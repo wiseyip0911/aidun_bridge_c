@@ -1,0 +1,17 @@
+[project]
+name = "aidun-bridge-c"
+version = "0.1.0"
+description = "Aidun kq-pool 实例池 HTTP 客户端（与 AB /bridge/ws 分离）"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,70 +1,102 @@
 # aidun_bridge_c
 
-Aidun **实例池 (kq-pool)** 的 C 端薄适配器。
+Aidun **实例池 (kq-pool)** 客户机守护进程。在本机长期运行,周期性从 Aidun 服务端拉取本实例的待处理任务,把每条任务写入本地 `data/pending/` 目录,供本机 Agent 消费。
 
-内核共享自 [`bridge-c-core`](https://github.com/wiseyip0911/bridge_c_core)(同一份代码用于 `yujia_bridge_c` / `aidun_bridge_c` / 未来其他公司的 `*_bridge_c`),本仓库**只负责声明本公司协议差异点**:
+> 📘 完整使用规则与排错见 **[docs/USAGE.md](docs/USAGE.md)**。
 
-| 差异点 | 本仓库声明           |
-|---|---|
-| URL 前缀     | `/kq-pool/v1`               |
-| 实例 header  | `X-Kq-Pool-Instance-Id`     |
-| 环境变量前缀 | `KQ_POOL_`                   |
+---
 
-整个适配层(`client.py` + `__main__.py` + `__init__.py`)合计不到 50 行。
+## 快速开始(末端机器 3 步)
 
-## 运行(末端机器最简流程)
-
-> 前置条件:客户机能访问 `github.com`(因为安装时会从 GitHub 拉取核心包 `bridge-c-core`)。
+> 前置:Python ≥ 3.10,客户机能访问 `github.com`。
 
 ```bash
 # 1) 克隆本仓库
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
 
-# 2) 安装(pip 会自动从 github 拉取 bridge-c-core@v0.1.1)
+# 2) 安装
 python -m pip install .
 
-# 3) 仅配 API_KEY(BASE_URL 已内置在仓库)
-export KQ_POOL_API_KEY=你的apikey
-
-# 4a) 守护轮询
+# 3) 配 API_KEY 并启动守护(BASE_URL 已内置)
+export KQ_POOL_API_KEY=<你的 apikey>
 python -m aidun_bridge_c
-
-# 4b) 仅做连通性检查(请求一次 /kq-pool/v1/directory)
-python -m aidun_bridge_c --once
-
-# 4c) 无 TTY 部署
-python -m aidun_bridge_c --no-interactive
 ```
+
+### 部署第一步:连通性自检
+
+正式启动守护进程前,先跑一次自检,确认 api_key 和网络通:
+
+```bash
+python -m aidun_bridge_c --once
+```
+
+期望输出一份 JSON,列出当前服务端的所有实例。详细排错见 [USAGE.md §6](docs/USAGE.md#6-排错)。
+
+---
 
 ## 环境变量
 
 | 变量                          | 必填 | 默认值                          | 说明                              |
 |-----------------------------|----|--------------------------------|---------------------------------|
-| `KQ_POOL_API_KEY`             | 是* | -                              | 管理页生成,TTY 下可交互输入           |
-| `KQ_POOL_BASE_URL`            | 否  | `http://c.aidunkouqiang.com`    | 仅在对端域名/协议临时变化时覆盖        |
-| `KQ_POOL_INSTANCE_ID`         | 否  | -                              | 与凭证一致时建议设置                  |
+| `KQ_POOL_API_KEY`             | 是  | -                              | 由对端管理页生成,**末端唯一必须配的项** |
+| `KQ_POOL_BASE_URL`            | 否  | `http://c.aidunkouqiang.com`    | 应急覆盖:对端域名/协议临时变化时使用    |
+| `KQ_POOL_INSTANCE_ID`         | 否  | -                              | 服务端要求与凭证分开展示实例时设置      |
 | `KQ_POOL_POLL_INTERVAL_SEC`   | 否  | `5`                            | 轮询间隔秒                          |
-| `KQ_POOL_PULL_LIMIT`          | 否  | `10`                           | 每次拉取上限                         |
+| `KQ_POOL_PULL_LIMIT`          | 否  | `10`                           | 单次拉取上限                         |
 | `KQ_POOL_LOCAL_POOL_DIR`      | 否  | `data/pending`                 | 本地落盘目录                         |
 | `KQ_POOL_HTTP_TIMEOUT_SEC`    | 否  | `60`                           | HTTP 超时秒                         |
 
-## 库用法
+---
+
+## 任务文件长什么样
+
+每条任务作为一个 JSON 文件落到 `data/pending/<record_id>.json`:
+
+```json
+{
+  "record_id": "721dddd0-ef10-4d3b-8e67-2908de3b4b7d",
+  "instance_id": "your-instance-id",
+  "correlation_id": "调用方提交时给的 id",
+  "record_type": "task",
+  "payload_json": { "...": "..." },
+  "created_at": "2026-05-13T11:35:18Z"
+}
+```
+
+本机 Agent 读取这个目录、处理任务、处理成功后删文件即可。完整 Agent 接入示例与多 Agent 互斥建议见 [USAGE.md §4](docs/USAGE.md#4-任务文件与本机-agent-的接口)。
+
+---
+
+## 库用法(在你自己的 Python 代码里投递消息)
 
 ```python
 from aidun_bridge_c import KqPoolClient
 
-with KqPoolClient(
-    base_url="http://127.0.0.1:8000",
-    api_key="...",
-    instance_id="my-device",
-) as c:
-    print(c.directory())
-    c.submit({"input_text": "hi", "payload_json": {}})
+with KqPoolClient() as c:                 # 自动从 env 读 API_KEY + 默认 base_url
+    print(c.directory())                  # 列出所有实例
+    c.submit({                            # 向自己的收件箱投递
+        "correlation_id": "any-id",
+        "input_text": "hi",
+        "payload_json": {"foo": "bar"},
+        "record_type": "task",
+    })
 ```
 
-`KqPoolClient` 自带 strict / relaxed 两种风格的全部方法(`inbox_pull` / `inbox_pull_relaxed` / `inbox_ack` / ...),详见 `bridge_c_core.BaseClient`。
+详见 [USAGE.md §5](docs/USAGE.md#5-投递消息c-端作为发送方)。
 
-## Git 远程
+---
+
+## 升级
+
+```bash
+cd aidun_bridge_c
+git pull
+python -m pip install -U .
+```
+
+---
+
+## 仓库
 
 `git@github.com:wiseyip0911/aidun_bridge_c.git`

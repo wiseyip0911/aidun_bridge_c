@@ -1,4 +1,4 @@
-"""Aidun kq-pool C 端入口。全部行为继承自 ``bridge_c_core``,本文件只负责绑定本公司适配器。"""
+"""Aidun kq-pool C 端守护进程入口:``python -m aidun_bridge_c``。"""
 from __future__ import annotations
 
 from bridge_c_core.cli import make_cli

@@ -1,7 +1,7 @@
 [project]
 name = "aidun-bridge-c"
-version = "0.2.0"
-description = "Aidun 实例池 (kq-pool) C 端薄适配器,内核共享自 bridge-c-core"
+version = "0.2.1"
+description = "Aidun 实例池 (kq-pool) C 端守护客户端"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

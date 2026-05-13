@@ -1,4 +1,4 @@
-"""Aidun kq-pool 实例池 C 端客户端 —— 仅声明协议差异点,逻辑全部继承自 ``bridge_c_core.BaseClient``。"""
+"""Aidun 实例池 (kq-pool) C 端 HTTP 客户端。"""
 from __future__ import annotations
 
 from bridge_c_core import BaseClient

@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.7
+git checkout v0.2.8
 python -m pip install .
 ```
 
@@ -119,6 +119,19 @@ KQ_POOL_NOTIFY_WEBHOOK_SECRET=INSECURE_NO_AUTH
 > hermes gateway run
 > ```
 > 然后把生成的 URL 写到上面的 env。完整搭法见 `docs/HERMES.md`。
+
+### 5.2 本机消息看板 Web UI
+
+若已在 `.env` 开启 `KQ_POOL_MESSAGE_LOG_PATH=data/messages.jsonl`(推荐),可启动
+本机 Web 看板:左侧联系人列表、右侧与该联系人的收发气泡、底部发送框;前端
+每 1.5 秒轮询刷新。
+
+```bash
+aidun-chat-web
+# 浏览器访问 http://127.0.0.1:8645/
+```
+
+默认仅监听 `127.0.0.1`,无鉴权(仅供本机浏览器)。改端口:`aidun-chat-web --port 9000`。
 
 ---
 

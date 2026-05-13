@@ -94,6 +94,17 @@ def _autoload_dotenv() -> None:
         return
 
 
+def resolve_message_log_path() -> Path:
+    """与守护进程对齐的消息总账文件路径(绝对路径)。"""
+    return _resolve_log_path()
+
+
+def read_message_log_rows(log_path: Path | None = None) -> list[dict[str, Any]]:
+    """读取 ``messages.jsonl`` 全部行并解析为 dict 列表。"""
+    p = log_path or _resolve_log_path()
+    return _read_rows(p)
+
+
 def _resolve_log_path() -> Path:
     """与守护进程对齐的总账位置。"""
     _autoload_dotenv()

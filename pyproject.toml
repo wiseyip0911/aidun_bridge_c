@@ -1,11 +1,11 @@
 [project]
 name = "aidun-bridge-c"
-version = "0.2.1"
+version = "0.2.2"
 description = "Aidun 实例池 (kq-pool) C 端守护客户端"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "bridge-c-core @ git+https://github.com/wiseyip0911/bridge_c_core.git@v0.1.1",
+    "bridge-c-core @ git+https://github.com/wiseyip0911/bridge_c_core.git@v0.1.2",
 ]
 
 [project.optional-dependencies]

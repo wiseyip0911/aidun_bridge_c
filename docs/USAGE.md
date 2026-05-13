@@ -39,9 +39,20 @@ python -m pip install .
 
 ## 3. 配置(最简只需 1 个环境变量)
 
+推荐用 `.env` 文件,守护进程启动时会自动加载,**不需要**每次手动 `export`:
+
+```bash
+cp .env.example .env
+# 用任意编辑器把 KQ_POOL_API_KEY=<你拿到的 apikey> 填上,保存
+```
+
+也支持直接走环境变量(适合 systemd 把 key 放到 unit 里):
+
 ```bash
 export KQ_POOL_API_KEY=<你拿到的 apikey>
 ```
+
+> 两种方式同时存在时,**进程环境变量优先**(`.env` 不会覆盖已设置的变量)。
 
 这就够了。其他变量都有默认值,需要调时再设。
 
@@ -242,9 +253,11 @@ with KqPoolClient() as c:
 | 现象 | 多半原因 | 怎么办 |
 |---|---|---|
 | `--once` 卡住,无响应 | 客户机访问不了对端 / 防火墙 | `curl -I http://c.aidunkouqiang.com` 看是否通;必要时改 `KQ_POOL_BASE_URL` 临时覆盖 |
-| `请设置环境变量 KQ_POOL_API_KEY` 然后退出 | 没设 API_KEY,且无 TTY | 设环境变量,或在 TTY 下交互输入(不带 `--no-interactive`) |
-| HTTP 401 | api_key 错 / 被禁用 | 找对端管理员确认状态,必要时重新生成 |
-| HTTP 404 + 日志提示"可能尚未部署 /inbox/pull" | 对端路径前缀不对 | 跟对端确认,或临时 `KQ_POOL_BASE_URL` 切到正确域名 |
+| 启动时提示输入密钥(交互回显) | 没建 `.env` 文件,且没 `export KQ_POOL_API_KEY` | `cp .env.example .env`,把 api_key 填进去 |
+| `请设置环境变量 KQ_POOL_API_KEY` 然后退出 | 同上,且无 TTY(`--no-interactive` 或 systemd) | 建 `.env` 或在 systemd unit 里 `Environment=KQ_POOL_API_KEY=...` |
+| HTTP 401 | api_key 错 / 被禁用 / 复制时多了空格 | 找对端管理员确认状态,必要时重新生成 |
+| HTTP 401 但你**确认 key 是对的** | `.env` 里那行末尾有空格、或注释里的 `#` 被当成值的一部分 | `cat .env` 自查;value 含特殊字符时用双引号包起来 |
+| HTTP 404 + 日志提示"可能尚未部署 /inbox/pull" | 对端路径前缀不对 / 没配 nginx 反代 | 跟对端确认;或临时 `KQ_POOL_BASE_URL=http://c.aidunkouqiang.com:9001` 直连绕过 nginx |
 | `data/pending/` 一直没有文件 | 服务端 inbox 是空的 | 正常现象,等真有人投递任务时才会出现;或自己 `c.submit({...})` 投一条测试 |
 | `--once` 看 `directory` 里没有自己 | 实例没注册 / api_key 关联了别的实例 | 找管理员确认 |
 | 日志反复"轮询失败" | 对端临时抽风 / 证书问题 | 守护进程会自动重试,等几分钟;持续异常查对端日志 |

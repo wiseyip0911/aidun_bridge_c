@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.4
+git checkout v0.2.5
 python -m pip install .
 ```
 
@@ -85,6 +85,40 @@ python -m aidun_bridge_c
 ```
 
 会一直跑,直到 Ctrl+C。看到周期性的 `HTTP/1.1 200 OK` 就是健康。
+
+### 5.1 可选:让"新任务到达"实时触发本机 Agent (webhook hook)
+
+默认守护只把任务落到 `data/pending/`,Agent 自己来查。如果你想"任务一落地就立刻
+被处理",可以让守护**额外**把整条记录 POST 给本机一个 webhook。
+
+在 `.env` 里加一行:
+
+```bash
+KQ_POOL_NOTIFY_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/bridge-task
+```
+
+可选加 HMAC secret(对端开启签名校验时必填,本机 loopback 调试可用
+`INSECURE_NO_AUTH` 占位):
+
+```bash
+KQ_POOL_NOTIFY_WEBHOOK_SECRET=INSECURE_NO_AUTH
+```
+
+行为约定:
+
+- **可选,默认禁用**:不设 `KQ_POOL_NOTIFY_WEBHOOK_URL` 就是老行为,完全向后兼容
+- **POST 失败不影响主循环**:任务文件已经原子落盘,Agent 仍可用 `ls data/pending/`
+  兜底,绝不会因 webhook 网络抖动而丢消息
+- **HMAC 签名兼容 GitHub 协议**:secret 非空时,自动在 `X-Hub-Signature-256`
+  头填 `sha256=<hex>`,可以直接对接 hermes gateway / GitHub Webhook 风格的接收方
+- **幂等**:每次 POST 携带 `X-Request-ID` = `record_id`,接收方据此去重
+
+> 典型搭配 hermes:
+> ```
+> hermes webhook subscribe bridge-task --secret INSECURE_NO_AUTH --prompt "..."
+> hermes gateway run
+> ```
+> 然后把生成的 URL 写到上面的 env。完整搭法见 `docs/HERMES.md`。
 
 ---
 

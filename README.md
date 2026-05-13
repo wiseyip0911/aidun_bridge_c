@@ -1,75 +1,69 @@
 # aidun_bridge_c
 
-Aidun **实例池 (kq-pool)** 的 C 端客户端，行为与誉佳 **`yujia_bridge_c`（`python -m bridge_c`）** 对齐：
+Aidun **实例池 (kq-pool)** 的 C 端薄适配器。
 
-- 默认 **`python -m aidun_bridge_c`**：**守护进程**，轮询 **`GET /kq-pool/v1/inbox/pull`**，将条目写入 **`data/pending/*.json`**
-- **`python -m aidun_bridge_c --once`**：只请求一次 **`GET /kq-pool/v1/directory`**（连通性检查）
+内核共享自 [`bridge-c-core`](https://github.com/wiseyip0911/bridge_c_core)(同一份代码用于 `yujia_bridge_c` / `aidun_bridge_c` / 未来其他公司的 `*_bridge_c`),本仓库**只负责声明本公司协议差异点**:
 
-与 AB WebSocket `/bridge/ws` 无关。服务端说明见 Aidun：`backend/docs/KQ_POOL_API_Aidun.md`。
+| 差异点 | 本仓库声明           |
+|---|---|
+| URL 前缀     | `/kq-pool/v1`               |
+| 实例 header  | `X-Kq-Pool-Instance-Id`     |
+| 环境变量前缀 | `KQ_POOL_`                   |
 
-## 与誉佳 C 端的差异（刻意保留）
+整个适配层(`client.py` + `__main__.py` + `__init__.py`)合计不到 50 行。
 
-| 项目 | 誉佳 BridgeC | Aidun 本仓库 |
-|------|----------------|--------------|
-| Base URL 环境变量 | `C_BRIDGE_BASE_URL` | **`KQ_POOL_BASE_URL`**（同机可避免与誉佳 env 冲突） |
-| API Key | `C_BRIDGE_API_KEY` | **`KQ_POOL_API_KEY`** |
-| 实例头 | `X-C-Instance-Id` | **`X-Kq-Pool-Instance-Id`**（Aidun 仍兼容旧头） |
-| HTTP 路径前缀 | `/c/v1` | **`/kq-pool/v1`** |
+## 运行(末端机器最简流程)
 
-其余：**轮询间隔、pull limit、本地目录、日志、`--no-interactive`** 与誉佳逻辑一致（变量名见下表）。
-
-## 环境变量
-
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `KQ_POOL_BASE_URL` | 是 | Aidun 根地址，无尾斜杠 |
-| `KQ_POOL_API_KEY` | 是* | 管理页创建的 api_key；TTY 下未设置可交互输入 |
-| `KQ_POOL_INSTANCE_ID` | 否 | 与凭证一致时建议设置 |
-| `KQ_POOL_POLL_INTERVAL_SEC` | 否 | 轮询秒数，默认 `5` |
-| `KQ_POOL_PULL_LIMIT` | 否 | 每次拉取上限，默认 `10` |
-| `KQ_POOL_LOCAL_POOL_DIR` | 否 | 本地 JSON 目录，默认 `data/pending` |
-| `KQ_POOL_HTTP_TIMEOUT_SEC` | 否 | HTTP 超时，默认 `60` |
-
-## 安装
+> 前置条件:客户机能访问 `github.com`(因为安装时会从 GitHub 拉取核心包 `bridge-c-core`)。
 
 ```bash
+# 1) 克隆本仓库
+git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-python -m pip install -e .
-# 或: pip install -r requirements.txt
-```
 
-## 运行（与誉佳「无 venv」方式类似）
+# 2) 安装(pip 会自动从 github 拉取 bridge-c-core@v0.1.1)
+python -m pip install .
 
-```bash
-export KQ_POOL_BASE_URL=https://你的Aidun根
-export KQ_POOL_API_KEY=...
+# 3) 仅配 API_KEY(BASE_URL 已内置在仓库)
+export KQ_POOL_API_KEY=你的apikey
+
+# 4a) 守护轮询
 python -m aidun_bridge_c
-```
 
-无 TTY 时需预先设置 `KQ_POOL_API_KEY`，或使用：
+# 4b) 仅做连通性检查(请求一次 /kq-pool/v1/directory)
+python -m aidun_bridge_c --once
 
-```bash
+# 4c) 无 TTY 部署
 python -m aidun_bridge_c --no-interactive
 ```
 
-仅测连通：
+## 环境变量
 
-```bash
-python -m aidun_bridge_c --once
-```
+| 变量                          | 必填 | 默认值                          | 说明                              |
+|-----------------------------|----|--------------------------------|---------------------------------|
+| `KQ_POOL_API_KEY`             | 是* | -                              | 管理页生成,TTY 下可交互输入           |
+| `KQ_POOL_BASE_URL`            | 否  | `http://c.aidunkouqiang.com`    | 仅在对端域名/协议临时变化时覆盖        |
+| `KQ_POOL_INSTANCE_ID`         | 否  | -                              | 与凭证一致时建议设置                  |
+| `KQ_POOL_POLL_INTERVAL_SEC`   | 否  | `5`                            | 轮询间隔秒                          |
+| `KQ_POOL_PULL_LIMIT`          | 否  | `10`                           | 每次拉取上限                         |
+| `KQ_POOL_LOCAL_POOL_DIR`      | 否  | `data/pending`                 | 本地落盘目录                         |
+| `KQ_POOL_HTTP_TIMEOUT_SEC`    | 否  | `60`                           | HTTP 超时秒                         |
 
 ## 库用法
 
 ```python
 from aidun_bridge_c import KqPoolClient
 
-c = KqPoolClient(
+with KqPoolClient(
     base_url="http://127.0.0.1:8000",
     api_key="...",
     instance_id="my-device",
-)
-print(c.directory())
+) as c:
+    print(c.directory())
+    c.submit({"input_text": "hi", "payload_json": {}})
 ```
+
+`KqPoolClient` 自带 strict / relaxed 两种风格的全部方法(`inbox_pull` / `inbox_pull_relaxed` / `inbox_ack` / ...),详见 `bridge_c_core.BaseClient`。
 
 ## Git 远程
 

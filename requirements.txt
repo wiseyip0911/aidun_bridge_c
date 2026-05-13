@@ -1,1 +1,1 @@
-httpx>=0.27,<1
+bridge-c-core @ git+https://github.com/wiseyip0911/bridge_c_core.git@v0.1.1

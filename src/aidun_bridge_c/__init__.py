@@ -1,8 +1,9 @@
-"""Aidun 实例池 (kq-pool) 客户端。"""
+"""Aidun 实例池 (kq-pool) C 端薄适配器,内核共享自 ``bridge_c_core``。"""
+
+from bridge_c_core import Settings
 
 from aidun_bridge_c.client import KqPoolClient
-from aidun_bridge_c.config import Settings, load_settings
 
-__all__ = ["KqPoolClient", "Settings", "load_settings", "__version__"]
+__all__ = ["KqPoolClient", "Settings", "__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

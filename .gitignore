@@ -8,3 +8,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# 运行时本地任务池（绝不能进仓库）
+data/
+daemon.out.log
+daemon.err.log

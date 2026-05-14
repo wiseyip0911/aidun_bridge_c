@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.12
+git checkout v0.2.13
 python -m pip install .
 ```
 
@@ -134,6 +134,22 @@ aidun-chat-web
 ```
 
 默认仅监听 `127.0.0.1`,无鉴权(仅供本机浏览器)。改端口:`aidun-chat-web --port 9000`。
+
+### 5.3 Windows 一键:桥 + 看板 + 浏览器(双击)
+
+仓库内 **`scripts/windows/Start-桥与看板.bat`**(同目录另有英文名 **`Start-Bridge-And-Dashboard.bat`**,功能相同):双击后会
+
+- 检测是否已有 `py -3 -m aidun_bridge_c`(非 `--once`)在跑;没有则**最小化窗口**启动桥(`--no-interactive`)。
+- 检测本机 `127.0.0.1:8645` 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。
+- 最后**打开默认浏览器**到 `http://127.0.0.1:8645/`。
+
+若桥与看板**都已就绪**,则只打开浏览器。日志追加到 `%TEMP%\aidun-bridge-dashboard-launcher.log`。
+
+高级用法(自定义端口,PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -WebPort 9000
+```
 
 ---
 

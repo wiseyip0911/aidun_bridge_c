@@ -8,8 +8,8 @@
 ======
 
     aidun-chat peers                       # 拉服务端的实例名单(directory)
-    aidun-chat send -t <peer> "<文本>"      # 给某实例发一条 chat
-    aidun-chat send -t <peer> -c <ch> "<txt>"   # 指定 channel
+    aidun-chat send -t <peer> "<文本>"      # 默认 channel=lookup
+    aidun-chat send -t <peer> -c chat "<txt>"   # 纯闲聊显式指定 chat
     aidun-chat send -t <peer> --json '<json>'   # 自定义 payload_json
     aidun-chat log                         # 展示全部时间线(最新 50 条)
     aidun-chat log --peer yeweizhi_mobile  # 只看与某实例的往来
@@ -281,7 +281,7 @@ def cmd_send(args: argparse.Namespace) -> int:
             return 2
     else:
         payload = {
-            "channel": args.channel or "chat",
+            "channel": args.channel or "lookup",
             "input_text": text,
         }
         if args.channel:
@@ -290,7 +290,7 @@ def cmd_send(args: argparse.Namespace) -> int:
         if me:
             payload.setdefault("source", me)
 
-    cid = args.correlation_id or f"chat-{uuid.uuid4().hex[:8]}"
+    cid = args.correlation_id or f"msg-{uuid.uuid4().hex[:8]}"
 
     body = {
         "to_instance_id": args.to,
@@ -442,8 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     ps = sub.add_parser("send", help="给某实例发一条消息")
     ps.add_argument("-t", "--to", required=True, help="接收方 instance_id")
     ps.add_argument(
-        "-c", "--channel", default="chat",
-        help="payload_json.channel,默认 chat",
+        "-c", "--channel", default="lookup",
+        help="payload_json.channel,默认 lookup(查询/走工具);纯闲聊选 chat",
     )
     ps.add_argument(
         "--record-type", default="task",
@@ -451,7 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ps.add_argument(
         "--correlation-id", default="",
-        help="可选;不传则自动生成 chat-<hex8>",
+        help="可选;不传则自动生成 msg-<hex8>",
     )
     ps.add_argument(
         "--json", dest="json_payload", default="",

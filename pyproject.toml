@@ -1,13 +1,13 @@
 [project]
 name = "aidun-bridge-c"
-version = "0.2.9"
+version = "0.2.10"
 description = "Aidun 实例池 (kq-pool) C 端守护客户端"
 readme = "README.md"
 requires-python = ">=3.10"
 # fastapi/uvicorn 现在由 bridge-c-core 自带(看板已下沉到 core),这里不再
 # 重复声明。
 dependencies = [
-    "bridge-c-core @ git+https://github.com/wiseyip0911/bridge_c_core.git@v0.1.5",
+    "bridge-c-core @ git+https://github.com/wiseyip0911/bridge_c_core.git@v0.1.6",
 ]
 
 [project.scripts]

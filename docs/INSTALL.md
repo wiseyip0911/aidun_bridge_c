@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.8
+git checkout v0.2.10
 python -m pip install .
 ```
 
@@ -122,9 +122,10 @@ KQ_POOL_NOTIFY_WEBHOOK_SECRET=INSECURE_NO_AUTH
 
 ### 5.2 本机消息看板 Web UI
 
-若已在 `.env` 开启 `KQ_POOL_MESSAGE_LOG_PATH=data/messages.jsonl`(推荐),可启动
+若已在 `.env` 开启 `KQ_POOL_MESSAGE_LOG_PATH=...`(推荐**绝对路径**),可启动
 本机 Web 看板:左侧联系人列表、右侧与该联系人的收发气泡、底部发送框;前端
-每 1.5 秒轮询刷新。
+每 1.5 秒轮询刷新。发送时可在底部选择 **channel**(默认 `lookup` 查询/走工具,
+纯闲聊选 `chat`,长文摘要选 `summarize`),与 [HERMES.md](HERMES.md) §3 约定一致。
 
 ```bash
 aidun-chat-web

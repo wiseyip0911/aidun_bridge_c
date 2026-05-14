@@ -11,10 +11,19 @@
 #>
 param(
   [int]$WebPort = 8645,
-  [string]$ListenHost = "127.0.0.1"
+  [string]$ListenHost = "127.0.0.1",
+  [int]$WebReadyTimeoutSec = 45
 )
 
 $ErrorActionPreference = "Continue"
+
+# 资源管理器双击启动时,进程 PATH 常为登录时快照,可能缺少「后装」的 Python;从注册表刷新 Machine+User PATH
+try {
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  if ($machinePath -or $userPath) { $env:Path = "$machinePath;$userPath" }
+} catch {}
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $RepoRoot
 
@@ -58,6 +67,16 @@ function Test-WebDashboardListening {
   } catch {
     return $false
   }
+}
+
+function Wait-WebDashboardReady {
+  param([int]$TimeoutSec)
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-WebDashboardListening) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return (Test-WebDashboardListening)
 }
 
 $py = Get-PythonLauncher
@@ -108,23 +127,28 @@ if (Test-WebDashboardListening) {
     Start-Process -FilePath $py.Exe -ArgumentList $args -WorkingDirectory $RepoRoot `
       -WindowStyle Minimized
   }
-  Start-Sleep -Seconds 2
-  if (Test-WebDashboardListening) {
+  if (Wait-WebDashboardReady -TimeoutSec $WebReadyTimeoutSec) {
     Write-Log "看板已监听 $ListenHost`:$WebPort"
   } else {
-    Write-Log "WARN: 端口 $WebPort 仍未监听,可能端口占用或启动失败。"
+    Write-Log "ERROR: ${WebReadyTimeoutSec}s 内端口 $WebPort 仍未监听。请检查: 1) 仓库根是否有有效 .env (含 KQ_POOL_API_KEY) 2) py -3 -m aidun_bridge_c.chat_webapp 能否手动启动 3) 是否与其它程序抢端口。"
   }
 }
 
 $url = "http://${ListenHost}:${WebPort}/"
-Write-Log "打开浏览器: $url"
-try {
-  Start-Process $url
-} catch {
-  Write-Log "ERROR: 无法打开浏览器: $_"
-  Read-Host "按 Enter 关闭"
-  exit 1
+if (Test-WebDashboardListening) {
+  Write-Log "打开浏览器: $url"
+  try {
+    Start-Process $url
+  } catch {
+    Write-Log "ERROR: 无法打开浏览器: $_"
+    Read-Host "按 Enter 关闭"
+    exit 1
+  }
+  Write-Log "完成。"
+  Start-Sleep -Milliseconds 800
+  exit 0
 }
 
-Write-Log "完成。"
-Start-Sleep -Milliseconds 800
+Write-Log "ERROR: 看板未就绪,已跳过打开浏览器。详细日志: $env:TEMP\aidun-bridge-dashboard-launcher.log"
+Read-Host "按 Enter 关闭"
+exit 1

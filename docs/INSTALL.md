@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.13
+git checkout v0.2.14
 python -m pip install .
 ```
 
@@ -144,6 +144,9 @@ aidun-chat-web
 - 最后**打开默认浏览器**到 `http://127.0.0.1:8645/`。
 
 若桥与看板**都已就绪**,则只打开浏览器。日志追加到 `%TEMP%\aidun-bridge-dashboard-launcher.log`。
+
+- 看板进程启动后**最多等待约 45s** 检测端口;若仍未监听,**不会**打开浏览器,脚本以退出码 1 结束,`.bat` 会 **`pause`** 方便阅读报错(同时可查上述日志)。
+- 脚本开头会从注册表合并 Machine/User **PATH**,减轻「终端里能跑 `py`、资源管理器双击却找不到」的情况。
 
 高级用法(自定义端口,PowerShell):
 

@@ -7,9 +7,9 @@
   使最终用户继续敲 ``aidun-chat-web`` 即可,无需再传 ``--client-factory``。
 - 若包内存在 ``web_static/index.html``,则设置 ``BRIDGE_C_CHAT_WEB_STATIC_DIR``
   指向该目录,加载 **V-Teeth卫齿士** 品牌皮肤(core ≥0.1.7)。
-- 在调用 core 之前**显式加载**本仓库根目录的 ``.env``。否则从任意 cwd 启动
-  ``aidun-chat-web`` 时,core 只会沿 ``bridge_c_core`` 的安装路径找 ``.env``,
-  常常读不到 ``KQ_POOL_API_KEY``,出现 ``directory_relaxed 失败``。
+- 在调用 core 之前**显式加载** ``.env``:先当前工作目录下的 ``.env``(与一键脚本
+  ``-WorkingDirectory`` 对齐),再尝试从包路径推断的仓库根(editable 布局)。
+  否则 core 常读不到 ``KQ_POOL_API_KEY``,出现 ``directory_relaxed 失败``。
 - 透传所有 CLI 参数到 core 的 ``main``,等同于 ``bridge-c-chat-web``。
 
 如需自定义客户端工厂(很少见),也可以显式 ``--client-factory``,会覆盖默认值。
@@ -25,16 +25,18 @@ DEFAULT_FACTORY = "aidun_bridge_c:KqPoolClient"
 
 
 def _load_repo_dotenv() -> None:
-    """加载仓库根 ``.env``,与 cwd 无关。
+    """加载 ``.env``:优先当前工作目录(与一键启动脚本的 ``-WorkingDirectory`` 对齐),
+    再尝试从包路径推断的仓库根(仅 editable / ``src`` 布局)。
 
-    仅当本文件位于 ``…/<repo>/src/aidun_bridge_c/chat_webapp.py``(editable 或
-    ``pip install -e``)时,向上定位 ``<repo>/.env``。若安装在纯 ``site-packages``
-    且无 ``src`` 段,则无法推断仓库路径,请从含 ``.env`` 的目录启动或导出环境变量。
+    纯 ``site-packages`` 安装时无 ``src`` 段,必须依赖 cwd 下的 ``.env`` 或已导出的环境变量。
     """
     try:
         from dotenv import load_dotenv  # type: ignore
     except Exception:
         return
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.is_file():
+        load_dotenv(cwd_env, override=False)
     here = Path(__file__).resolve()
     parts = here.parts
     if len(parts) >= 3 and parts[-3] == "src" and parts[-2] == "aidun_bridge_c":

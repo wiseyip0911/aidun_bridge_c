@@ -1,13 +1,16 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  一键启动 Aidun 桥守护 + V-Teeth 消息看板(Windows),并打开浏览器。
+  One-click: Aidun bridge daemon + local chat web dashboard (Windows), open browser.
 
 .DESCRIPTION
-  - 若本机已有桥进程( python/py -m aidun_bridge_c ,非 --once )在跑 → 不重复启动。
-  - 若 127.0.0.1:WebPort 已有监听 → 不重复启动看板。
-  - 缺谁启谁;最后打开 http://127.0.0.1:WebPort/
-  依赖: 已 pip install aidun-bridge-c, 仓库根目录有 .env (含 KQ_POOL_API_KEY)。
+  - If bridge (py -m aidun_bridge_c, not --once) is running -> skip start.
+  - If WebPort is listening -> skip web.
+  - Else start missing pieces; open http://127.0.0.1:WebPort/
+  Requires: pip install aidun-bridge-c, repo root .env with KQ_POOL_API_KEY.
+
+  NOTE: Runtime log strings are ASCII-only so Windows PowerShell 5.1 -File
+  works without UTF-8 BOM mis-parse on Chinese-locale systems.
 #>
 param(
   [int]$WebPort = 8645,
@@ -17,7 +20,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 
-# 日志必须在解析仓库路径之前可用:否则 Resolve-Path 抛错时用户看到「无日志」、无法排查
+# Log must work before Resolve-Path, or a path error leaves no log file on disk.
 $LauncherLog = Join-Path $env:TEMP "aidun-bridge-dashboard-launcher.log"
 function Write-Log([string]$m) {
   $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m
@@ -29,9 +32,9 @@ function Write-Log([string]$m) {
   }
 }
 
-Write-Log "=== 启动 begin PSScriptRoot=$PSScriptRoot 初始PWD=$((Get-Location).Path) ==="
+Write-Log "=== begin PSScriptRoot=$PSScriptRoot initialPWD=$((Get-Location).Path) ==="
 
-# 资源管理器双击启动时,进程 PATH 常为登录时快照,可能缺少「后装」的 Python;从注册表刷新 Machine+User PATH
+# Explorer-launched processes may have a stale PATH; refresh Machine+User PATH from registry.
 try {
   $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -40,24 +43,24 @@ try {
 
 $candRoot = Join-Path $PSScriptRoot "..\.."
 if (-not $PSScriptRoot) {
-  Write-Log "ERROR: PSScriptRoot 为空。请用: powershell -ExecutionPolicy Bypass -File `"<仓库>\scripts\windows\start_bridge_and_dashboard.ps1`""
-  Read-Host "按 Enter 关闭"
+  Write-Log "ERROR: PSScriptRoot empty. Run: powershell -ExecutionPolicy Bypass -File `"<repo>\scripts\windows\start_bridge_and_dashboard.ps1`""
+  Read-Host "Press Enter to close"
   exit 1
 }
 if (-not (Test-Path -LiteralPath $candRoot)) {
-  Write-Log "ERROR: 仓库根路径不存在: $candRoot 。请从完整克隆的 aidun_bridge_c 内运行 scripts\windows 下的 bat,勿只拷贝 bat 到别处。"
-  Read-Host "按 Enter 关闭"
+  Write-Log "ERROR: repo root missing: $candRoot (run bat from cloned aidun_bridge_c; do not copy only the .bat away)"
+  Read-Host "Press Enter to close"
   exit 1
 }
 try {
   $RepoRoot = (Resolve-Path -LiteralPath $candRoot).Path
 } catch {
-  Write-Log "ERROR: 无法解析仓库根: $_  candRoot=$candRoot"
-  Read-Host "按 Enter 关闭"
+  Write-Log "ERROR: Resolve-Path failed: $_ candRoot=$candRoot"
+  Read-Host "Press Enter to close"
   exit 1
 }
 Set-Location -LiteralPath $RepoRoot
-Write-Log "仓库根(已 cd): $RepoRoot"
+Write-Log "REPO_ROOT (cd ok): $RepoRoot"
 
 function Get-PythonLauncher {
   if (Get-Command py -ErrorAction SilentlyContinue) {
@@ -105,22 +108,22 @@ function Wait-WebDashboardReady {
 
 $py = Get-PythonLauncher
 if (-not $py) {
-  Write-Log "ERROR: 未找到 py -3 或 python,请先安装 Python 3.10+ 并加入 PATH。"
-  Read-Host "按 Enter 关闭"
+  Write-Log "ERROR: py -3 or python not found. Install Python 3.10+ and add to PATH."
+  Read-Host "Press Enter to close"
   exit 1
 }
 
 Write-Log "Python: $($py.Exe) $($py.Prefix -join ' ')"
 
 if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
-  Write-Log "WARN: 未找到 $RepoRoot\.env ,桥与看板可能因缺少 KQ_POOL_API_KEY 启动失败。请复制 .env.example 为 .env 并填写。"
+  Write-Log "WARN: .env missing under repo root; bridge/web may exit (need KQ_POOL_API_KEY). Copy .env.example to .env"
 }
 
-# --- 桥 ---
+# --- bridge ---
 if (Test-BridgeDaemonRunning) {
-  Write-Log "桥守护进程已在运行,跳过启动。"
+  Write-Log "Bridge daemon already running; skip start."
 } else {
-  Write-Log "正在启动桥守护进程…"
+  Write-Log "Starting bridge daemon..."
   $args = @()
   if ($py.Prefix.Count -gt 0) { $args += $py.Prefix }
   $args += @("-m", "aidun_bridge_c", "--no-interactive")
@@ -128,17 +131,17 @@ if (Test-BridgeDaemonRunning) {
     -WindowStyle Minimized
   Start-Sleep -Seconds 2
   if (Test-BridgeDaemonRunning) {
-    Write-Log "桥已启动。"
+    Write-Log "Bridge started."
   } else {
-    Write-Log "WARN: 未检测到桥进程,可能启动失败。请查看任务管理器或手动运行: py -3 -m aidun_bridge_c --once"
+    Write-Log "WARN: bridge process not detected; try manually: py -3 -m aidun_bridge_c --once"
   }
 }
 
-# --- 看板 ---
+# --- web dashboard ---
 if (Test-WebDashboardListening) {
-  Write-Log "看板已在端口 $WebPort 监听,跳过启动。"
+  Write-Log "Web already listening on port $WebPort ; skip start."
 } else {
-  Write-Log "正在启动 aidun-chat-web (端口 $WebPort)…"
+  Write-Log "Starting aidun-chat-web on port $WebPort ..."
   $chatCmd = Get-Command "aidun-chat-web" -ErrorAction SilentlyContinue
   if ($chatCmd) {
     Start-Process -FilePath $chatCmd.Source -ArgumentList @("--host", $ListenHost, "--port", "$WebPort") `
@@ -151,27 +154,27 @@ if (Test-WebDashboardListening) {
       -WindowStyle Minimized
   }
   if (Wait-WebDashboardReady -TimeoutSec $WebReadyTimeoutSec) {
-    Write-Log "看板已监听 $ListenHost`:$WebPort"
+    Write-Log "Web listening on ${ListenHost}:${WebPort}"
   } else {
-    Write-Log "ERROR: ${WebReadyTimeoutSec}s 内端口 $WebPort 仍未监听。请检查: 1) 仓库根是否有有效 .env (含 KQ_POOL_API_KEY) 2) py -3 -m aidun_bridge_c.chat_webapp 能否手动启动 3) 是否与其它程序抢端口。"
+    Write-Log "ERROR: port $WebPort not listening after ${WebReadyTimeoutSec}s. Check .env (KQ_POOL_API_KEY), manual: py -3 -m aidun_bridge_c.chat_webapp , port conflict."
   }
 }
 
 $url = "http://${ListenHost}:${WebPort}/"
 if (Test-WebDashboardListening) {
-  Write-Log "打开浏览器: $url"
+  Write-Log "Open browser: $url"
   try {
     Start-Process $url
   } catch {
-    Write-Log "ERROR: 无法打开浏览器: $_"
-    Read-Host "按 Enter 关闭"
+    Write-Log "ERROR: Start-Process browser failed: $_"
+    Read-Host "Press Enter to close"
     exit 1
   }
-  Write-Log "完成。"
+  Write-Log "Done."
   Start-Sleep -Milliseconds 800
   exit 0
 }
 
-Write-Log "ERROR: 看板未就绪,已跳过打开浏览器。详细日志: $env:TEMP\aidun-bridge-dashboard-launcher.log"
-Read-Host "按 Enter 关闭"
+Write-Log "ERROR: web not ready; browser not opened. See log: $LauncherLog"
+Read-Host "Press Enter to close"
 exit 1

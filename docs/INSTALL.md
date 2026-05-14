@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.15
+git checkout v0.2.16
 python -m pip install .
 ```
 
@@ -147,6 +147,7 @@ aidun-chat-web
 
 - 看板进程启动后**最多等待约 45s** 检测端口;若仍未监听,**不会**打开浏览器,脚本以退出码 1 结束,`.bat` 会 **`pause`** 方便阅读报错(同时可查上述日志)。
 - 脚本开头会从注册表合并 Machine/User **PATH**,减轻「终端里能跑 `py`、资源管理器双击却找不到」的情况。
+- 启动器 `.ps1` 使用 **UTF-8 BOM** 且运行时日志为英文,避免 Windows PowerShell 5.1 在中文区域下把无 BOM UTF-8 误当成系统编码解析导致**整脚本语法报错**。
 
 高级用法(自定义端口,PowerShell):
 

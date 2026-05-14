@@ -17,6 +17,20 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+# 日志必须在解析仓库路径之前可用:否则 Resolve-Path 抛错时用户看到「无日志」、无法排查
+$LauncherLog = Join-Path $env:TEMP "aidun-bridge-dashboard-launcher.log"
+function Write-Log([string]$m) {
+  $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m
+  Write-Host $line
+  try {
+    Add-Content -LiteralPath $LauncherLog -Value $line -Encoding UTF8
+  } catch {
+    try { [Console]::Error.WriteLine($line) } catch {}
+  }
+}
+
+Write-Log "=== 启动 begin PSScriptRoot=$PSScriptRoot 初始PWD=$((Get-Location).Path) ==="
+
 # 资源管理器双击启动时,进程 PATH 常为登录时快照,可能缺少「后装」的 Python;从注册表刷新 Machine+User PATH
 try {
   $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -24,16 +38,26 @@ try {
   if ($machinePath -or $userPath) { $env:Path = "$machinePath;$userPath" }
 } catch {}
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-Set-Location $RepoRoot
-
-function Write-Log([string]$m) {
-  $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m
-  Write-Host $line
-  try {
-    Add-Content -Path (Join-Path $env:TEMP "aidun-bridge-dashboard-launcher.log") -Value $line -Encoding UTF8
-  } catch {}
+$candRoot = Join-Path $PSScriptRoot "..\.."
+if (-not $PSScriptRoot) {
+  Write-Log "ERROR: PSScriptRoot 为空。请用: powershell -ExecutionPolicy Bypass -File `"<仓库>\scripts\windows\start_bridge_and_dashboard.ps1`""
+  Read-Host "按 Enter 关闭"
+  exit 1
 }
+if (-not (Test-Path -LiteralPath $candRoot)) {
+  Write-Log "ERROR: 仓库根路径不存在: $candRoot 。请从完整克隆的 aidun_bridge_c 内运行 scripts\windows 下的 bat,勿只拷贝 bat 到别处。"
+  Read-Host "按 Enter 关闭"
+  exit 1
+}
+try {
+  $RepoRoot = (Resolve-Path -LiteralPath $candRoot).Path
+} catch {
+  Write-Log "ERROR: 无法解析仓库根: $_  candRoot=$candRoot"
+  Read-Host "按 Enter 关闭"
+  exit 1
+}
+Set-Location -LiteralPath $RepoRoot
+Write-Log "仓库根(已 cd): $RepoRoot"
 
 function Get-PythonLauncher {
   if (Get-Command py -ErrorAction SilentlyContinue) {
@@ -86,7 +110,6 @@ if (-not $py) {
   exit 1
 }
 
-Write-Log "仓库根: $RepoRoot"
 Write-Log "Python: $($py.Exe) $($py.Prefix -join ' ')"
 
 if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {

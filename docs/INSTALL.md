@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.10
+git checkout v0.2.11
 python -m pip install .
 ```
 
@@ -126,6 +126,7 @@ KQ_POOL_NOTIFY_WEBHOOK_SECRET=INSECURE_NO_AUTH
 本机 Web 看板:左侧联系人列表、右侧与该联系人的收发气泡、底部发送框;前端
 每 1.5 秒轮询刷新。发送时可在底部选择 **channel**(默认 `lookup` 查询/走工具,
 纯闲聊选 `chat`,长文摘要选 `summarize`),与 [HERMES.md](HERMES.md) §3 约定一致。
+`aidun-chat-web` 使用 **V-Teeth卫齿士** 品牌皮肤(主色 CMYK 0/60/100/0 → 屏显橙 `#ff6600`)。
 
 ```bash
 aidun-chat-web

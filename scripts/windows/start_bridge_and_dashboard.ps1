@@ -21,7 +21,8 @@ param(
   [int]$HermesTuiWarmupMinSec = 10,
   [int]$HermesTuiWarmupMaxSec = 10,
   [int]$HermesTuiPollIntervalSec = 2,
-  [int]$HermesGatewayReadyTimeoutSec = 45,
+  [int]$HermesGatewayReadyTimeoutSec = 120,
+  [int]$HermesGatewayGraceSec = 30,
   [string]$HermesCmdPath = "",
   [ValidateSet("auto", "none", "gateway", "tui", "tui_then_gateway")]
   [string]$HermesLaunchMode = "none",
@@ -161,13 +162,47 @@ function Wait-WebDashboardReady {
 }
 
 function Wait-HermesGatewayReady {
-  param([int]$TimeoutSec)
-  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  param(
+    [int]$TimeoutSec,
+    [int]$GraceSec = 0
+  )
+  $t0 = Get-Date
+  $nextHb = $t0.AddSeconds(15)
+  Write-Log "Hermes: waiting for gateway port $HermesGatewayPort (up to ${TimeoutSec}s, then grace ${GraceSec}s)."
+  $deadline = $t0.AddSeconds($TimeoutSec)
   while ((Get-Date) -lt $deadline) {
-    if (Test-HermesGatewayListening) { return $true }
+    if (Test-HermesGatewayListening) {
+      $elapsed = [int](((Get-Date) - $t0).TotalSeconds)
+      Write-Log "Hermes: gateway port $HermesGatewayPort listening (${elapsed}s)."
+      return $true
+    }
+    $now = Get-Date
+    if ($now -ge $nextHb) {
+      $elapsed = [int](($now - $t0).TotalSeconds)
+      Write-Log "Hermes: gateway port $HermesGatewayPort not up yet (${elapsed}s / ${TimeoutSec}s)."
+      $nextHb = $now.AddSeconds(15)
+    }
     Start-Sleep -Seconds 1
   }
+  if (Test-HermesGatewayListening) { return $true }
+  if ($GraceSec -le 0) { return $false }
+  Write-Log "Hermes: primary wait ended; grace probe ${GraceSec}s for port $HermesGatewayPort."
+  $graceEnd = (Get-Date).AddSeconds($GraceSec)
+  while ((Get-Date) -lt $graceEnd) {
+    if (Test-HermesGatewayListening) {
+      $elapsed = [int](((Get-Date) - $t0).TotalSeconds)
+      Write-Log "Hermes: gateway port $HermesGatewayPort listening during grace (${elapsed}s total)."
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
   return (Test-HermesGatewayListening)
+}
+
+function Start-HermesGatewayAndWait {
+  param([string]$LauncherPath)
+  Start-HermesGatewayMinimized -LauncherPath $LauncherPath
+  return (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec -GraceSec $HermesGatewayGraceSec)
 }
 
 function Invoke-HermesTuiInitWait {
@@ -176,7 +211,6 @@ function Invoke-HermesTuiInitWait {
   Write-Log "Hermes: TUI init wait ${InitSec}s (--tui does not listen on gateway port $HermesGatewayPort)."
   $msgZh = "Hermes: TUI 已启动，等待 ${InitSec} 秒做初始化（TUI 不会监听 ${HermesGatewayPort} 网关，随后将单独启动 gateway）。"
   Write-Host $msgZh
-  Write-Log $msgZh
   Start-Sleep -Seconds $InitSec
 }
 
@@ -361,10 +395,7 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
   }
   if (-not $skipHermesStart) {
     if ($hermesResolvedMode -eq "gateway") {
-      Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
-      if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
-        Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
-      }
+      $null = Start-HermesGatewayAndWait -LauncherPath $hermesLauncher
     }
     elseif ($hermesResolvedMode -eq "tui") {
       Start-HermesTuiConsole -LauncherPath $hermesLauncher
@@ -377,10 +408,7 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
       Invoke-HermesTuiInitWait -InitSec $tuiInitSec
       if (-not (Test-HermesGatewayListening)) {
         Write-Log "Hermes: starting gateway run (webhook port $HermesGatewayPort)."
-        Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
-        if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
-          Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
-        }
+        $null = Start-HermesGatewayAndWait -LauncherPath $hermesLauncher
       } else {
         Write-Log "Hermes: gateway already listening after TUI init; skip gateway start."
       }

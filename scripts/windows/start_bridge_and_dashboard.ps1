@@ -8,7 +8,7 @@
   -RecycleAll: stop matching bridge / hermes_worker / Hermes / our web on WebPort, then start in order.
   HermesLaunchMode auto: if hermes.cmd exists -> tui_then_gateway, else none (bat passes -HermesLaunchMode auto).
   If auto and Hermes is missing, runs scripts/windows/Install-VTeethHermes.ps1 in a new window and exits 0 (relaunch after install).
-  TUI: cmd /k console; tui_then_gateway waits HermesTuiWarmupMinSec then polls gateway port every HermesTuiPollIntervalSec until HermesTuiWarmupMaxSec (early exit if port listens).
+  TUI: cmd /k console; tui_then_gateway waits HermesTuiWarmupMinSec for TUI init only (--tui does not bind gateway port), then starts gateway run if needed.
 
   NOTE: Most log lines are ASCII-only for Windows PowerShell 5.1 -File; user-facing WARN lines may use Chinese.
 #>
@@ -18,8 +18,8 @@ param(
   [string]$ListenHost = "127.0.0.1",
   [int]$WebReadyTimeoutSec = 45,
   [int]$HermesWatchIntervalSec = 5,
-  [int]$HermesTuiWarmupMinSec = 8,
-  [int]$HermesTuiWarmupMaxSec = 120,
+  [int]$HermesTuiWarmupMinSec = 10,
+  [int]$HermesTuiWarmupMaxSec = 10,
   [int]$HermesTuiPollIntervalSec = 2,
   [int]$HermesGatewayReadyTimeoutSec = 45,
   [string]$HermesCmdPath = "",
@@ -170,32 +170,14 @@ function Wait-HermesGatewayReady {
   return (Test-HermesGatewayListening)
 }
 
-function Invoke-HermesTuiWarmupWait {
-  param(
-    [int]$MinSec,
-    [int]$MaxSec,
-    [int]$PollSec
-  )
-  if ($MaxSec -lt $MinSec) { $MaxSec = $MinSec }
-  $deadline = (Get-Date).AddSeconds($MaxSec)
-  $t0 = Get-Date
-  $nextHb = $t0.AddSeconds(20)
-  Write-Log "Hermes: TUI warmup window ${MaxSec}s (min wait ${MinSec}s, poll ${PollSec}s, gateway port $HermesGatewayPort); exit early if gateway listens."
-  Start-Sleep -Seconds $MinSec
-  while ((Get-Date) -lt $deadline) {
-    if (Test-HermesGatewayListening) {
-      Write-Log "Hermes: gateway listening during TUI warmup (early exit)."
-      return
-    }
-    $now = Get-Date
-    if ($now -ge $nextHb) {
-      $elapsed = [int](($now - $t0).TotalSeconds)
-      Write-Log "Hermes: TUI warmup still waiting (no listener on ${HermesGatewayPort} yet, ${elapsed}s elapsed)."
-      $nextHb = $now.AddSeconds(20)
-    }
-    Start-Sleep -Seconds $PollSec
-  }
-  Write-Log "Hermes: TUI warmup window finished (deadline reached)."
+function Invoke-HermesTuiInitWait {
+  param([int]$InitSec)
+  if ($InitSec -lt 1) { $InitSec = 1 }
+  Write-Log "Hermes: TUI init wait ${InitSec}s (--tui does not listen on gateway port $HermesGatewayPort)."
+  $msgZh = "Hermes: TUI 已启动，等待 ${InitSec} 秒做初始化（TUI 不会监听 ${HermesGatewayPort} 网关，随后将单独启动 gateway）。"
+  Write-Host $msgZh
+  Write-Log $msgZh
+  Start-Sleep -Seconds $InitSec
 }
 
 function Resolve-HermesLauncher {
@@ -390,14 +372,17 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
     }
     elseif ($hermesResolvedMode -eq "tui_then_gateway") {
       Start-HermesTuiConsole -LauncherPath $hermesLauncher
-      Invoke-HermesTuiWarmupWait -MinSec $HermesTuiWarmupMinSec -MaxSec $HermesTuiWarmupMaxSec -PollSec $HermesTuiPollIntervalSec
+      $tuiInitSec = $HermesTuiWarmupMinSec
+      if ($HermesTuiWarmupMaxSec -gt $tuiInitSec) { $tuiInitSec = $HermesTuiWarmupMaxSec }
+      Invoke-HermesTuiInitWait -InitSec $tuiInitSec
       if (-not (Test-HermesGatewayListening)) {
+        Write-Log "Hermes: starting gateway run (webhook port $HermesGatewayPort)."
         Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
         if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
           Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
         }
       } else {
-        Write-Log "Hermes: gateway already listening after TUI warmup; skip second gateway start."
+        Write-Log "Hermes: gateway already listening after TUI init; skip gateway start."
       }
     }
     if ($hermesResolvedMode -eq "gateway" -or $hermesResolvedMode -eq "tui_then_gateway") {

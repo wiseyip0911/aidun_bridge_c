@@ -6,9 +6,9 @@
 .DESCRIPTION
   Default (no -RecycleAll): start missing pieces only (skip if already running).
   -RecycleAll: stop matching bridge / hermes_worker / Hermes / our web on WebPort, then start in order.
-  HermesLaunchMode auto: if hermes.cmd exists -> tui_then_gateway, else none (bat passes -HermesLaunchMode auto).
+  HermesLaunchMode auto: if hermes.cmd exists -> gateway only (fast path for webhook 8644). Use -WithHermesTui to open TUI after gateway is up.
   If auto and Hermes is missing, runs scripts/windows/Install-VTeethHermes.ps1 in a new window and exits 0 (relaunch after install).
-  TUI: cmd /k console; tui_then_gateway waits HermesTuiWarmupMinSec for TUI init only (--tui does not bind gateway port), then starts gateway run if needed.
+  tui_then_gateway: TUI first then gateway (can block; Hermes is often single-instance). Prefer auto + -WithHermesTui.
 
   NOTE: Most log lines are ASCII-only for Windows PowerShell 5.1 -File; user-facing WARN lines may use Chinese.
 #>
@@ -21,15 +21,16 @@ param(
   [int]$HermesTuiWarmupMinSec = 10,
   [int]$HermesTuiWarmupMaxSec = 10,
   [int]$HermesTuiPollIntervalSec = 2,
-  [int]$HermesGatewayReadyTimeoutSec = 120,
-  [int]$HermesGatewayGraceSec = 30,
+  [int]$HermesGatewayReadyTimeoutSec = 90,
+  [int]$HermesGatewayGraceSec = 15,
   [string]$HermesCmdPath = "",
   [ValidateSet("auto", "none", "gateway", "tui", "tui_then_gateway")]
   [string]$HermesLaunchMode = "none",
   [switch]$RecycleAll,
   [switch]$NoHermes,
   [switch]$NoHermesWorker,
-  [switch]$SkipHermesInstall
+  [switch]$SkipHermesInstall,
+  [switch]$WithHermesTui
 )
 
 $ErrorActionPreference = "Continue"
@@ -148,7 +149,24 @@ function Test-WebDashboardListening {
 }
 
 function Test-HermesGatewayListening {
-  return (Test-TcpPortListening -Port $HermesGatewayPort)
+  if (Test-TcpPortListening -Port $HermesGatewayPort) { return $true }
+  try {
+    $uri = "http://127.0.0.1:${HermesGatewayPort}/health"
+    $r = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+    return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)
+  } catch {
+    return $false
+  }
+}
+
+function Test-HermesGatewayProcessRunning {
+  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $c = $_.CommandLine
+    if (-not $c) { return $false }
+    if ($c -match "pytest|unittest") { return $false }
+    $lc = $c.ToLowerInvariant()
+    ($lc -match "hermes\.exe|hermes\.cmd") -and ($lc -match "\bgateway\b") -and ($lc -match "\brun\b")
+  }).Count -gt 0
 }
 
 function Wait-WebDashboardReady {
@@ -202,6 +220,10 @@ function Wait-HermesGatewayReady {
 function Start-HermesGatewayAndWait {
   param([string]$LauncherPath)
   Start-HermesGatewayMinimized -LauncherPath $LauncherPath
+  Start-Sleep -Seconds 3
+  if (-not (Test-HermesGatewayProcessRunning)) {
+    Write-Log "WARN: no hermes gateway run process seen after 3s (spawn failed or exited)."
+  }
   return (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec -GraceSec $HermesGatewayGraceSec)
 }
 
@@ -233,7 +255,7 @@ function Resolve-HermesLaunchMode {
   param([string]$Mode, [bool]$LauncherExists)
   $m = $Mode.ToLowerInvariant().Trim()
   if ($m -eq "auto") {
-    if ($LauncherExists) { return "tui_then_gateway" }
+    if ($LauncherExists) { return "gateway" }
     return "none"
   }
   if (@("none", "gateway", "tui", "tui_then_gateway") -contains $m) { return $m }
@@ -417,6 +439,10 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
       if (-not (Test-HermesGatewayListening)) {
         Write-HermesStartFailedHint
       }
+    }
+    if ($WithHermesTui -and $hermesLauncher) {
+      Write-Log "Hermes: opening TUI console after gateway start (-WithHermesTui)."
+      Start-HermesTuiConsole -LauncherPath $hermesLauncher
     }
   }
 } elseif ($NoHermes) {

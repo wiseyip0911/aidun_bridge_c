@@ -6,4 +6,4 @@ from aidun_bridge_c.client import KqPoolClient
 
 __all__ = ["KqPoolClient", "Settings", "__version__"]
 
-__version__ = "0.2.23"
+__version__ = "0.2.24"

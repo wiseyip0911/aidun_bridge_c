@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.18
+git checkout v0.2.19
 python -m pip install .
 ```
 
@@ -139,8 +139,8 @@ aidun-chat-web
 
 仓库内 **`scripts/windows/Start-桥与看板.bat`**(同目录另有英文名 **`Start-Bridge-And-Dashboard.bat`**,功能相同):双击后会
 
-- **`-RecycleAll -HermesLaunchMode auto`**:先结束本机栈上旧进程(**`hermes_worker watch`**、**`py -m aidun_bridge_c --no-interactive`**、在 **`WebPort`** 上监听的 **`chat_webapp`/`aidun-chat-web`**、以及命令行可识别的 **Hermes** 相关进程),再按顺序拉起。
-- **Hermes(`auto`)**:若存在启动器(默认探测 `D:\vteeth\hermes\bin\hermes.cmd`,也可用环境变量 **`HERMES_CMD`** 或参数 **`-HermesCmdPath`** 指定),则等价 **`tui_then_gateway`**:新开 **`cmd /k`** 窗口跑 **`hermes --tui`**(需真实控制台以完成初始化),等待 **`HermesTuiWarmupSec`**(默认 15s)后,若 **`HermesGatewayPort`**(默认 8644)仍无监听,再**最小化**启动 **`hermes gateway run`**。
+- **`-RecycleAll -HermesLaunchMode auto`**:先结束本机栈上旧进程(**`hermes_worker watch`**、**`py -m aidun_bridge_c --no-interactive`**、在 **`WebPort`** 上监听的 **`chat_webapp`/`aidun-chat-web`**、以及命令行可识别的 **Hermes** 相关进程),再按顺序拉起。若 **`auto`** 且未找到 Hermes 启动器,则新开窗口运行仓库内 **`scripts/windows/Install-VTeethHermes.ps1`**(原 V-Teeth Windows 装机脚本),**本启动器立即 exit 0 退出**(不在此等待安装完成);安装结束后再双击本脚本。不需要此行为时传 **`-SkipHermesInstall`**(将退回仅桥/看板,且 Hermes 仍为缺失)。安装脚本要求 **D: 盘** 与可访问 **`raw.githubusercontent.com`**。
+- **Hermes(`auto`)**:若存在启动器(默认探测 `D:\vteeth\hermes\bin\hermes.cmd`,也可用环境变量 **`HERMES_CMD`** 或参数 **`-HermesCmdPath`** 指定),则等价 **`tui_then_gateway`**:新开 **`cmd /k`** 窗口跑 **`hermes --tui`**;随后先固定等待 **`HermesTuiWarmupMinSec`**(默认 8s),再在总时长 **`HermesTuiWarmupMaxSec`**(默认 120s)内每隔 **`HermesTuiPollIntervalSec`**(默认 2s)检测 **`HermesGatewayPort`** 是否已监听——**一旦监听则提前结束等待**;若窗口结束后仍无监听,再**最小化**启动 **`hermes gateway run`**。
 - 然后**最小化**启动桥 **`py -3 -m aidun_bridge_c --no-interactive`**。
 - 再检测 **`hermes_worker watch`**;没有则**最小化**拉起(默认 `--interval 5`)。不需要时可传 **`-NoHermesWorker`**。
 - 检测本机 **`ListenHost:WebPort`** 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。
@@ -160,7 +160,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dash
 # 与 bat 相同:全量杀掉再起 + Hermes(auto=tui 控制台 + gateway)
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -RecycleAll -HermesLaunchMode auto
 # 指定 Hermes 启动器、网关端口、TUI 等待秒数
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -RecycleAll -HermesLaunchMode tui_then_gateway -HermesCmdPath "D:\vteeth\hermes\bin\hermes.cmd" -HermesGatewayPort 8644 -HermesTuiWarmupSec 20
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -RecycleAll -HermesLaunchMode tui_then_gateway -HermesCmdPath "D:\vteeth\hermes\bin\hermes.cmd" -HermesGatewayPort 8644 -HermesTuiWarmupMaxSec 180 -HermesTuiWarmupMinSec 10 -HermesTuiPollIntervalSec 2
 ```
 
 ---

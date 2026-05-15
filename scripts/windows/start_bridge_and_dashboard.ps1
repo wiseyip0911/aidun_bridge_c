@@ -7,7 +7,8 @@
   Default (no -RecycleAll): start missing pieces only (skip if already running).
   -RecycleAll: stop matching bridge / hermes_worker / Hermes / our web on WebPort, then start in order.
   HermesLaunchMode auto: if hermes.cmd exists -> tui_then_gateway, else none (bat passes -HermesLaunchMode auto).
-  TUI is started via cmd /k in a normal console (TTY); gateway may start minimized after HermesTuiWarmupSec.
+  If auto and Hermes is missing, runs scripts/windows/Install-VTeethHermes.ps1 in a new window and exits 0 (relaunch after install).
+  TUI: cmd /k console; tui_then_gateway waits HermesTuiWarmupMinSec then polls gateway port every HermesTuiPollIntervalSec until HermesTuiWarmupMaxSec (early exit if port listens).
 
   NOTE: Runtime log strings are ASCII-only so Windows PowerShell 5.1 -File works on Chinese-locale systems.
 #>
@@ -17,14 +18,17 @@ param(
   [string]$ListenHost = "127.0.0.1",
   [int]$WebReadyTimeoutSec = 45,
   [int]$HermesWatchIntervalSec = 5,
-  [int]$HermesTuiWarmupSec = 15,
+  [int]$HermesTuiWarmupMinSec = 8,
+  [int]$HermesTuiWarmupMaxSec = 120,
+  [int]$HermesTuiPollIntervalSec = 2,
   [int]$HermesGatewayReadyTimeoutSec = 45,
   [string]$HermesCmdPath = "",
   [ValidateSet("auto", "none", "gateway", "tui", "tui_then_gateway")]
   [string]$HermesLaunchMode = "none",
   [switch]$RecycleAll,
   [switch]$NoHermes,
-  [switch]$NoHermesWorker
+  [switch]$NoHermesWorker,
+  [switch]$SkipHermesInstall
 )
 
 $ErrorActionPreference = "Continue"
@@ -167,6 +171,26 @@ function Wait-HermesGatewayReady {
   return (Test-HermesGatewayListening)
 }
 
+function Invoke-HermesTuiWarmupWait {
+  param(
+    [int]$MinSec,
+    [int]$MaxSec,
+    [int]$PollSec
+  )
+  if ($MaxSec -lt $MinSec) { $MaxSec = $MinSec }
+  $deadline = (Get-Date).AddSeconds($MaxSec)
+  Write-Log "Hermes: TUI warmup window ${MaxSec}s (min wait ${MinSec}s, poll ${PollSec}s, gateway port $HermesGatewayPort); exit early if gateway listens."
+  Start-Sleep -Seconds $MinSec
+  while ((Get-Date) -lt $deadline) {
+    if (Test-HermesGatewayListening) {
+      Write-Log "Hermes: gateway listening during TUI warmup (early exit)."
+      return
+    }
+    Start-Sleep -Seconds $PollSec
+  }
+  Write-Log "Hermes: TUI warmup window finished (deadline reached)."
+}
+
 function Resolve-HermesLauncher {
   param([string]$ExplicitPath)
   $cands = @()
@@ -219,7 +243,7 @@ function Get-HermesKillCandidates {
 }
 
 function Get-OurWebListenerProcesses {
-  $out = New-Object System.Collections.Generic.List[object]
+  $arr = @()
   try {
     $conns = @(Get-NetTCPConnection -LocalPort $WebPort -State Listen -ErrorAction SilentlyContinue)
     $pids = @($conns | Select-Object -ExpandProperty OwningProcess -Unique)
@@ -228,10 +252,10 @@ function Get-OurWebListenerProcesses {
       if (-not $p) { continue }
       $c = $p.CommandLine
       if (-not $c) { continue }
-      if ($c -match "chat_webapp|aidun-chat-web") { $out.Add($p) }
+      if ($c -match "chat_webapp|aidun-chat-web") { $arr += $p }
     }
   } catch {}
-  return @($out)
+  return $arr
 }
 
 function Stop-ProcessListLogged {
@@ -301,12 +325,28 @@ if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
   Write-Log "WARN: .env missing under repo root; bridge/web may exit (need KQ_POOL_API_KEY). Copy .env.example to .env"
 }
 
+$hermesInstallScript = Join-Path $PSScriptRoot "Install-VTeethHermes.ps1"
+
 $hermesLauncher = $null
 if (-not $NoHermes) {
   $hp = $HermesCmdPath
   if (-not $hp) { $hp = "" }
   $hermesLauncher = Resolve-HermesLauncher -ExplicitPath $hp
 }
+
+if (-not $NoHermes -and -not $SkipHermesInstall -and ($HermesLaunchMode -eq "auto") -and -not $hermesLauncher) {
+  if (-not (Test-Path -LiteralPath $hermesInstallScript)) {
+    Write-Log "ERROR: Hermes not installed and repo installer missing: $hermesInstallScript"
+    Read-Host "Press Enter to close"
+    exit 1
+  }
+  Write-Log "Hermes launcher not found; starting V-Teeth Hermes installer in a new window. This launcher exits now (exit 0). After install finishes, run this launcher again."
+  Start-Process -FilePath "powershell.exe" -ArgumentList @(
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $hermesInstallScript
+  ) -WorkingDirectory $PSScriptRoot
+  exit 0
+}
+
 $hermesResolvedMode = Resolve-HermesLaunchMode -Mode $HermesLaunchMode -LauncherExists ([bool]$hermesLauncher)
 if (-not $hermesLauncher -and $hermesResolvedMode -ne "none") {
   Write-Log "WARN: Hermes launcher not found (set -HermesCmdPath or HERMES_CMD); HermesLaunchMode effective=none"
@@ -339,8 +379,7 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
     }
     elseif ($hermesResolvedMode -eq "tui_then_gateway") {
       Start-HermesTuiConsole -LauncherPath $hermesLauncher
-      Write-Log "Hermes: TUI warmup ${HermesTuiWarmupSec}s..."
-      Start-Sleep -Seconds $HermesTuiWarmupSec
+      Invoke-HermesTuiWarmupWait -MinSec $HermesTuiWarmupMinSec -MaxSec $HermesTuiWarmupMaxSec -PollSec $HermesTuiPollIntervalSec
       if (-not (Test-HermesGatewayListening)) {
         Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
         if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {

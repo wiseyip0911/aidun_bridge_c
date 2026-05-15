@@ -5,6 +5,7 @@
 
 .DESCRIPTION
   - If bridge (py -m aidun_bridge_c, not --once) is running -> skip start.
+  - If hermes_worker watch is running -> skip start; else start minimized.
   - If WebPort is listening -> skip web.
   - Else start missing pieces; open http://127.0.0.1:WebPort/
   Requires: pip install aidun-bridge-c, repo root .env with KQ_POOL_API_KEY.
@@ -15,7 +16,9 @@
 param(
   [int]$WebPort = 8645,
   [string]$ListenHost = "127.0.0.1",
-  [int]$WebReadyTimeoutSec = 45
+  [int]$WebReadyTimeoutSec = 45,
+  [int]$HermesWatchIntervalSec = 5,
+  [switch]$NoHermesWorker
 )
 
 $ErrorActionPreference = "Continue"
@@ -78,10 +81,22 @@ function Test-BridgeDaemonRunning {
   $hits = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     $c = $_.CommandLine
     if (-not $c) { return $false }
-    if ($c -match "pytest|unittest|aidun-chat-web|chat_webapp") { return $false }
+    if ($c -match "pytest|unittest|aidun-chat-web|chat_webapp|hermes_worker") { return $false }
     if ($c -notmatch "[\-/]m\s+aidun_bridge_c(\s|$)") { return $false }
     if ($c -match "\-\-once(\s|$)") { return $false }
     $true
+  })
+  return $hits.Count -gt 0
+}
+
+function Test-HermesWorkerWatchRunning {
+  $hits = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $c = $_.CommandLine
+    if (-not $c) { return $false }
+    if ($c -match "pytest|unittest") { return $false }
+    if ($c -match "[\-/]m\s+aidun_bridge_c\.hermes_worker" -and $c -match "\bwatch\b") { return $true }
+    if ($c -match "aidun-hermes-worker(\.exe)?\s" -and $c -match "\bwatch\b") { return $true }
+    $false
   })
   return $hits.Count -gt 0
 }
@@ -135,6 +150,28 @@ if (Test-BridgeDaemonRunning) {
   } else {
     Write-Log "WARN: bridge process not detected; try manually: py -3 -m aidun_bridge_c --once"
   }
+}
+
+# --- aidun-hermes-worker watch (reads data/pending, reply to pool) ---
+if (-not $NoHermesWorker) {
+  if (Test-HermesWorkerWatchRunning) {
+    Write-Log "aidun-hermes-worker watch already running; skip start."
+  } else {
+    Write-Log "Starting aidun_bridge_c.hermes_worker watch (interval ${HermesWatchIntervalSec}s)..."
+    $hwArgs = @()
+    if ($py.Prefix.Count -gt 0) { $hwArgs += $py.Prefix }
+    $hwArgs += @("-m", "aidun_bridge_c.hermes_worker", "watch", "--interval", "$HermesWatchIntervalSec")
+    Start-Process -FilePath $py.Exe -ArgumentList $hwArgs -WorkingDirectory $RepoRoot `
+      -WindowStyle Minimized
+    Start-Sleep -Seconds 1
+    if (Test-HermesWorkerWatchRunning) {
+      Write-Log "Hermes worker watch started."
+    } else {
+      Write-Log "WARN: hermes_worker watch not detected; run manually: py -3 -m aidun_bridge_c.hermes_worker watch --interval $HermesWatchIntervalSec"
+    }
+  }
+} else {
+  Write-Log "Skip hermes_worker watch (-NoHermesWorker)."
 }
 
 # --- web dashboard ---

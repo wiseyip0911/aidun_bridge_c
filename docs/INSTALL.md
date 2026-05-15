@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.16
+git checkout v0.2.17
 python -m pip install .
 ```
 
@@ -140,6 +140,7 @@ aidun-chat-web
 仓库内 **`scripts/windows/Start-桥与看板.bat`**(同目录另有英文名 **`Start-Bridge-And-Dashboard.bat`**,功能相同):双击后会
 
 - 检测是否已有 `py -3 -m aidun_bridge_c`(非 `--once`)在跑;没有则**最小化窗口**启动桥(`--no-interactive`)。
+- 检测是否已有 **`aidun-hermes-worker watch`** / **`py -m aidun_bridge_c.hermes_worker watch`** 在跑;没有则**最小化**拉起(默认 `--interval 5`,可用参数改)。不需要时可传 **`-NoHermesWorker`**。
 - 检测本机 `127.0.0.1:8645` 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。
 - 最后**打开默认浏览器**到 `http://127.0.0.1:8645/`。
 
@@ -153,6 +154,8 @@ aidun-chat-web
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -WebPort 9000
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -NoHermesWorker
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -HermesWatchIntervalSec 10
 ```
 
 ---

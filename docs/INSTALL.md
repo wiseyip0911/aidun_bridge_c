@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.20
+git checkout v0.2.21
 python -m pip install .
 ```
 
@@ -140,7 +140,7 @@ aidun-chat-web
 仓库内 **`scripts/windows/Start-桥与看板.bat`**(同目录另有英文名 **`Start-Bridge-And-Dashboard.bat`**,功能相同):双击后会
 
 - **`-RecycleAll -HermesLaunchMode auto`**:先结束本机栈上旧进程(**`hermes_worker watch`**、**`py -m aidun_bridge_c --no-interactive`**、在 **`WebPort`** 上监听的 **`chat_webapp`/`aidun-chat-web`**、以及命令行可识别的 **Hermes** 相关进程),再按顺序拉起。若 **`auto`** 且未找到 Hermes 启动器,则新开窗口运行仓库内 **`scripts/windows/Install-VTeethHermes.ps1`**(原 V-Teeth Windows 装机脚本),**本启动器立即 exit 0 退出**(不在此等待安装完成);安装结束后再双击本脚本。不需要此行为时传 **`-SkipHermesInstall`**(将退回仅桥/看板,且 Hermes 仍为缺失)。安装脚本要求 **D: 盘** 与可访问 **`raw.githubusercontent.com`**。
-- **Hermes(`auto`)**:若存在启动器(默认探测 `D:\vteeth\hermes\bin\hermes.cmd`,也可用环境变量 **`HERMES_CMD`** 或参数 **`-HermesCmdPath`** 指定),则等价 **`tui_then_gateway`**:新开 **`cmd /k`** 窗口跑 **`hermes --tui`**;随后先固定等待 **`HermesTuiWarmupMinSec`**(默认 8s),再在总时长 **`HermesTuiWarmupMaxSec`**(默认 120s)内每隔 **`HermesTuiPollIntervalSec`**(默认 2s)检测 **`HermesGatewayPort`** 是否已监听——**一旦监听则提前结束等待**;若窗口结束后仍无监听,再**最小化**启动 **`hermes gateway run`**。若 **`gateway` / `tui_then_gateway`** 流程结束后 **`HermesGatewayPort`** 仍无监听,会在控制台与 **`%TEMP%\aidun-bridge-dashboard-launcher.log`** 中提示:「启动 Hermes 失败，请检查 Hermes 是否正确安装和正确启动。」桥与看板仍会尝试继续启动。
+- **Hermes(`auto`)**:若存在启动器(默认探测 `D:\vteeth\hermes\bin\hermes.cmd`,也可用环境变量 **`HERMES_CMD`** 或参数 **`-HermesCmdPath`** 指定),则等价 **`tui_then_gateway`**:新开 **`cmd /k`** 窗口跑 **`hermes --tui`**;随后先固定等待 **`HermesTuiWarmupMinSec`**(默认 8s),再在总时长 **`HermesTuiWarmupMaxSec`**(默认 120s)内每隔 **`HermesTuiPollIntervalSec`**(默认 2s)检测 **`HermesGatewayPort`** 在本机是否有 **`Listen` TCP 套接字(不限制 `LocalAddress`,避免漏掉 **`::1`** 等绑定)——**一旦监听则提前结束等待**,预热阶段约每 **20s** 打一行等待日志;若窗口结束后仍无监听,再**最小化**启动 **`hermes gateway run`**。若 **`gateway` / `tui_then_gateway`** 流程结束后 **`HermesGatewayPort`** 仍无监听,会在控制台与 **`%TEMP%\aidun-bridge-dashboard-launcher.log`** 中提示:「启动 Hermes 失败，请检查 Hermes 是否正确安装和正确启动。」桥与看板仍会尝试继续启动。
 - 然后**最小化**启动桥 **`py -3 -m aidun_bridge_c --no-interactive`**。
 - 再检测 **`hermes_worker watch`**;没有则**最小化**拉起(默认 `--interval 5`)。不需要时可传 **`-NoHermesWorker`**。
 - 检测本机 **`ListenHost:WebPort`** 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。
@@ -149,7 +149,7 @@ aidun-chat-web
 - 脚本开头会从注册表合并 Machine/User **PATH**,减轻「终端里能跑 `py`、资源管理器双击却找不到」的情况。
 - 启动器 `.ps1` 使用 **UTF-8 BOM**;日志以英文为主,少数面向用户的提示为中文,避免 Windows PowerShell 5.1 在中文区域下把无 BOM UTF-8 误当成系统编码解析导致**整脚本语法报错**。
 
-若**未**使用 `-RecycleAll`,则仍按「缺什么补什么」:已有桥/看板/worker 则跳过对应启动;若 **`HermesGatewayPort`** 已有监听则跳过 Hermes。**Hermes** 在仅运行 `.ps1` 时默认 **`HermesLaunchMode none`**;需要本机 Hermes 时传 **`-HermesLaunchMode auto`**(或与 bat 相同参数)。日志: `%TEMP%\aidun-bridge-dashboard-launcher.log`。
+若**未**使用 `-RecycleAll`,则仍按「缺什么补什么」:已有桥/看板/worker 则跳过对应启动;若 **`HermesGatewayPort`** 已有监听则跳过 Hermes。**Hermes** 在仅运行 `.ps1` 时默认 **`HermesLaunchMode none`**;需要本机 Hermes 时传 **`-HermesLaunchMode auto`**(或与 bat 相同参数)。看板与 Hermes 网关端口是否就绪,由 **`Get-NetTCPConnection` 在该端口是否有 `Listen`** 判断(不限制 `LocalAddress`,避免 Windows 上 **`::1`** 等绑定被漏检)。
 
 高级用法(自定义端口,PowerShell):
 

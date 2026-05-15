@@ -131,24 +131,23 @@ function Get-HermesWorkerWatchProcesses {
   })
 }
 
-function Test-WebDashboardListening {
+function Test-TcpPortListening {
+  param([int]$Port)
   try {
-    $x = @(Get-NetTCPConnection -LocalPort $WebPort -State Listen -ErrorAction SilentlyContinue |
-      Where-Object { $_.LocalAddress -eq "127.0.0.1" -or $_.LocalAddress -eq "::" -or $_.LocalAddress -eq "0.0.0.0" })
+    # Any LISTEN on LocalPort counts. Narrow filters (127.0.0.1 / :: only) miss ::1 and other local bind shapes on Windows.
+    $x = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
     return $x.Count -gt 0
   } catch {
     return $false
   }
 }
 
+function Test-WebDashboardListening {
+  return (Test-TcpPortListening -Port $WebPort)
+}
+
 function Test-HermesGatewayListening {
-  try {
-    $x = @(Get-NetTCPConnection -LocalPort $HermesGatewayPort -State Listen -ErrorAction SilentlyContinue |
-      Where-Object { $_.LocalAddress -eq "127.0.0.1" -or $_.LocalAddress -eq "::" -or $_.LocalAddress -eq "0.0.0.0" })
-    return $x.Count -gt 0
-  } catch {
-    return $false
-  }
+  return (Test-TcpPortListening -Port $HermesGatewayPort)
 }
 
 function Wait-WebDashboardReady {
@@ -179,12 +178,20 @@ function Invoke-HermesTuiWarmupWait {
   )
   if ($MaxSec -lt $MinSec) { $MaxSec = $MinSec }
   $deadline = (Get-Date).AddSeconds($MaxSec)
+  $t0 = Get-Date
+  $nextHb = $t0.AddSeconds(20)
   Write-Log "Hermes: TUI warmup window ${MaxSec}s (min wait ${MinSec}s, poll ${PollSec}s, gateway port $HermesGatewayPort); exit early if gateway listens."
   Start-Sleep -Seconds $MinSec
   while ((Get-Date) -lt $deadline) {
     if (Test-HermesGatewayListening) {
       Write-Log "Hermes: gateway listening during TUI warmup (early exit)."
       return
+    }
+    $now = Get-Date
+    if ($now -ge $nextHb) {
+      $elapsed = [int](($now - $t0).TotalSeconds)
+      Write-Log "Hermes: TUI warmup still waiting (no listener on ${HermesGatewayPort} yet, ${elapsed}s elapsed)."
+      $nextHb = $now.AddSeconds(20)
     }
     Start-Sleep -Seconds $PollSec
   }
@@ -260,7 +267,7 @@ function Get-OurWebListenerProcesses {
 
 function Stop-ProcessListLogged {
   param([array]$Procs, [string]$Label)
-  $ids = @($Procs | ForEach-Object { [int]$_.ProcessId } | Sort-Object -Unique)
+  $ids = @($Procs | ForEach-Object { [int]$_.ProcessId } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
   foreach ($id in $ids) {
     $one = @($Procs | Where-Object { $_.ProcessId -eq $id })[0]
     $snip = ""

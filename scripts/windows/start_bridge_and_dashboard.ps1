@@ -10,7 +10,7 @@
   If auto and Hermes is missing, runs scripts/windows/Install-VTeethHermes.ps1 in a new window and exits 0 (relaunch after install).
   TUI: cmd /k console; tui_then_gateway waits HermesTuiWarmupMinSec then polls gateway port every HermesTuiPollIntervalSec until HermesTuiWarmupMaxSec (early exit if port listens).
 
-  NOTE: Runtime log strings are ASCII-only so Windows PowerShell 5.1 -File works on Chinese-locale systems.
+  NOTE: Most log lines are ASCII-only for Windows PowerShell 5.1 -File; user-facing WARN lines may use Chinese.
 #>
 param(
   [int]$WebPort = 8645,
@@ -294,6 +294,12 @@ function Invoke-RecycleAidunStack {
   Write-Log "RecycleAll: stop pass done."
 }
 
+function Write-HermesStartFailedHint {
+  $msgZh = "启动 Hermes 失败，请检查 Hermes 是否正确安装和正确启动。"
+  Write-Host $msgZh
+  Write-Log "WARN: $msgZh"
+}
+
 function Start-HermesTuiConsole {
   param([string]$LauncherPath)
   $bin = Split-Path -Parent $LauncherPath
@@ -369,8 +375,6 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
       Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
       if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
         Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
-      } else {
-        Write-Log "WARN: Hermes gateway port $HermesGatewayPort not listening after ${HermesGatewayReadyTimeoutSec}s."
       }
     }
     elseif ($hermesResolvedMode -eq "tui") {
@@ -384,11 +388,14 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
         Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
         if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
           Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
-        } else {
-          Write-Log "WARN: Hermes gateway port $HermesGatewayPort not listening after ${HermesGatewayReadyTimeoutSec}s."
         }
       } else {
         Write-Log "Hermes: gateway already listening after TUI warmup; skip second gateway start."
+      }
+    }
+    if ($hermesResolvedMode -eq "gateway" -or $hermesResolvedMode -eq "tui_then_gateway") {
+      if (-not (Test-HermesGatewayListening)) {
+        Write-HermesStartFailedHint
       }
     }
   }

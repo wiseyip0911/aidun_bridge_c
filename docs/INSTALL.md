@@ -19,7 +19,7 @@
 ```bash
 git clone https://github.com/wiseyip0911/aidun_bridge_c.git
 cd aidun_bridge_c
-git checkout v0.2.17
+git checkout v0.2.18
 python -m pip install .
 ```
 
@@ -139,16 +139,17 @@ aidun-chat-web
 
 仓库内 **`scripts/windows/Start-桥与看板.bat`**(同目录另有英文名 **`Start-Bridge-And-Dashboard.bat`**,功能相同):双击后会
 
-- 检测是否已有 `py -3 -m aidun_bridge_c`(非 `--once`)在跑;没有则**最小化窗口**启动桥(`--no-interactive`)。
-- 检测是否已有 **`aidun-hermes-worker watch`** / **`py -m aidun_bridge_c.hermes_worker watch`** 在跑;没有则**最小化**拉起(默认 `--interval 5`,可用参数改)。不需要时可传 **`-NoHermesWorker`**。
-- 检测本机 `127.0.0.1:8645` 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。
-- 最后**打开默认浏览器**到 `http://127.0.0.1:8645/`。
-
-若桥与看板**都已就绪**,则只打开浏览器。日志追加到 `%TEMP%\aidun-bridge-dashboard-launcher.log`。
-
+- **`-RecycleAll -HermesLaunchMode auto`**:先结束本机栈上旧进程(**`hermes_worker watch`**、**`py -m aidun_bridge_c --no-interactive`**、在 **`WebPort`** 上监听的 **`chat_webapp`/`aidun-chat-web`**、以及命令行可识别的 **Hermes** 相关进程),再按顺序拉起。
+- **Hermes(`auto`)**:若存在启动器(默认探测 `D:\vteeth\hermes\bin\hermes.cmd`,也可用环境变量 **`HERMES_CMD`** 或参数 **`-HermesCmdPath`** 指定),则等价 **`tui_then_gateway`**:新开 **`cmd /k`** 窗口跑 **`hermes --tui`**(需真实控制台以完成初始化),等待 **`HermesTuiWarmupSec`**(默认 15s)后,若 **`HermesGatewayPort`**(默认 8644)仍无监听,再**最小化**启动 **`hermes gateway run`**。
+- 然后**最小化**启动桥 **`py -3 -m aidun_bridge_c --no-interactive`**。
+- 再检测 **`hermes_worker watch`**;没有则**最小化**拉起(默认 `--interval 5`)。不需要时可传 **`-NoHermesWorker`**。
+- 检测本机 **`ListenHost:WebPort`** 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。
+- 最后**打开默认浏览器**到看板 URL。
 - 看板进程启动后**最多等待约 45s** 检测端口;若仍未监听,**不会**打开浏览器,脚本以退出码 1 结束,`.bat` 会 **`pause`** 方便阅读报错(同时可查上述日志)。
 - 脚本开头会从注册表合并 Machine/User **PATH**,减轻「终端里能跑 `py`、资源管理器双击却找不到」的情况。
 - 启动器 `.ps1` 使用 **UTF-8 BOM** 且运行时日志为英文,避免 Windows PowerShell 5.1 在中文区域下把无 BOM UTF-8 误当成系统编码解析导致**整脚本语法报错**。
+
+若**未**使用 `-RecycleAll`,则仍按「缺什么补什么」:已有桥/看板/worker 则跳过对应启动;若 **`HermesGatewayPort`** 已有监听则跳过 Hermes。**Hermes** 在仅运行 `.ps1` 时默认 **`HermesLaunchMode none`**;需要本机 Hermes 时传 **`-HermesLaunchMode auto`**(或与 bat 相同参数)。日志: `%TEMP%\aidun-bridge-dashboard-launcher.log`。
 
 高级用法(自定义端口,PowerShell):
 
@@ -156,6 +157,10 @@ aidun-chat-web
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -WebPort 9000
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -NoHermesWorker
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -HermesWatchIntervalSec 10
+# 与 bat 相同:全量杀掉再起 + Hermes(auto=tui 控制台 + gateway)
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -RecycleAll -HermesLaunchMode auto
+# 指定 Hermes 启动器、网关端口、TUI 等待秒数
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start_bridge_and_dashboard.ps1 -RecycleAll -HermesLaunchMode tui_then_gateway -HermesCmdPath "D:\vteeth\hermes\bin\hermes.cmd" -HermesGatewayPort 8644 -HermesTuiWarmupSec 20
 ```
 
 ---

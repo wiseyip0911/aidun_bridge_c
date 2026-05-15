@@ -1,29 +1,34 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  One-click: Aidun bridge daemon + local chat web dashboard (Windows), open browser.
+  One-click: optional Hermes + Aidun bridge + hermes_worker watch + local chat web (Windows).
 
 .DESCRIPTION
-  - If bridge (py -m aidun_bridge_c, not --once) is running -> skip start.
-  - If hermes_worker watch is running -> skip start; else start minimized.
-  - If WebPort is listening -> skip web.
-  - Else start missing pieces; open http://127.0.0.1:WebPort/
-  Requires: pip install aidun-bridge-c, repo root .env with KQ_POOL_API_KEY.
+  Default (no -RecycleAll): start missing pieces only (skip if already running).
+  -RecycleAll: stop matching bridge / hermes_worker / Hermes / our web on WebPort, then start in order.
+  HermesLaunchMode auto: if hermes.cmd exists -> tui_then_gateway, else none (bat passes -HermesLaunchMode auto).
+  TUI is started via cmd /k in a normal console (TTY); gateway may start minimized after HermesTuiWarmupSec.
 
-  NOTE: Runtime log strings are ASCII-only so Windows PowerShell 5.1 -File
-  works without UTF-8 BOM mis-parse on Chinese-locale systems.
+  NOTE: Runtime log strings are ASCII-only so Windows PowerShell 5.1 -File works on Chinese-locale systems.
 #>
 param(
   [int]$WebPort = 8645,
+  [int]$HermesGatewayPort = 8644,
   [string]$ListenHost = "127.0.0.1",
   [int]$WebReadyTimeoutSec = 45,
   [int]$HermesWatchIntervalSec = 5,
+  [int]$HermesTuiWarmupSec = 15,
+  [int]$HermesGatewayReadyTimeoutSec = 45,
+  [string]$HermesCmdPath = "",
+  [ValidateSet("auto", "none", "gateway", "tui", "tui_then_gateway")]
+  [string]$HermesLaunchMode = "none",
+  [switch]$RecycleAll,
+  [switch]$NoHermes,
   [switch]$NoHermesWorker
 )
 
 $ErrorActionPreference = "Continue"
 
-# Log must work before Resolve-Path, or a path error leaves no log file on disk.
 $LauncherLog = Join-Path $env:TEMP "aidun-bridge-dashboard-launcher.log"
 function Write-Log([string]$m) {
   $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m
@@ -35,9 +40,8 @@ function Write-Log([string]$m) {
   }
 }
 
-Write-Log "=== begin PSScriptRoot=$PSScriptRoot initialPWD=$((Get-Location).Path) ==="
+Write-Log "=== begin PSScriptRoot=$PSScriptRoot initialPWD=$((Get-Location).Path) RecycleAll=$RecycleAll ==="
 
-# Explorer-launched processes may have a stale PATH; refresh Machine+User PATH from registry.
 try {
   $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -89,6 +93,17 @@ function Test-BridgeDaemonRunning {
   return $hits.Count -gt 0
 }
 
+function Get-BridgeDaemonProcesses {
+  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $c = $_.CommandLine
+    if (-not $c) { return $false }
+    if ($c -match "pytest|unittest|aidun-chat-web|chat_webapp|hermes_worker") { return $false }
+    if ($c -notmatch "[\-/]m\s+aidun_bridge_c(\s|$)") { return $false }
+    if ($c -match "\-\-once(\s|$)") { return $false }
+    $true
+  })
+}
+
 function Test-HermesWorkerWatchRunning {
   $hits = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     $c = $_.CommandLine
@@ -101,9 +116,30 @@ function Test-HermesWorkerWatchRunning {
   return $hits.Count -gt 0
 }
 
+function Get-HermesWorkerWatchProcesses {
+  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $c = $_.CommandLine
+    if (-not $c) { return $false }
+    if ($c -match "pytest|unittest") { return $false }
+    if ($c -match "[\-/]m\s+aidun_bridge_c\.hermes_worker" -and $c -match "\bwatch\b") { return $true }
+    if ($c -match "aidun-hermes-worker(\.exe)?\s" -and $c -match "\bwatch\b") { return $true }
+    $false
+  })
+}
+
 function Test-WebDashboardListening {
   try {
     $x = @(Get-NetTCPConnection -LocalPort $WebPort -State Listen -ErrorAction SilentlyContinue |
+      Where-Object { $_.LocalAddress -eq "127.0.0.1" -or $_.LocalAddress -eq "::" -or $_.LocalAddress -eq "0.0.0.0" })
+    return $x.Count -gt 0
+  } catch {
+    return $false
+  }
+}
+
+function Test-HermesGatewayListening {
+  try {
+    $x = @(Get-NetTCPConnection -LocalPort $HermesGatewayPort -State Listen -ErrorAction SilentlyContinue |
       Where-Object { $_.LocalAddress -eq "127.0.0.1" -or $_.LocalAddress -eq "::" -or $_.LocalAddress -eq "0.0.0.0" })
     return $x.Count -gt 0
   } catch {
@@ -121,6 +157,137 @@ function Wait-WebDashboardReady {
   return (Test-WebDashboardListening)
 }
 
+function Wait-HermesGatewayReady {
+  param([int]$TimeoutSec)
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-HermesGatewayListening) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return (Test-HermesGatewayListening)
+}
+
+function Resolve-HermesLauncher {
+  param([string]$ExplicitPath)
+  $cands = @()
+  if ($ExplicitPath) { $cands += $ExplicitPath }
+  if ($env:HERMES_CMD) { $cands += $env:HERMES_CMD }
+  $cands += "D:\vteeth\hermes\bin\hermes.cmd"
+  foreach ($p in $cands) {
+    if (-not $p) { continue }
+    try {
+      if (Test-Path -LiteralPath $p) { return (Resolve-Path -LiteralPath $p).Path }
+    } catch {}
+  }
+  return $null
+}
+
+function Resolve-HermesLaunchMode {
+  param([string]$Mode, [bool]$LauncherExists)
+  $m = $Mode.ToLowerInvariant().Trim()
+  if ($m -eq "auto") {
+    if ($LauncherExists) { return "tui_then_gateway" }
+    return "none"
+  }
+  if (@("none", "gateway", "tui", "tui_then_gateway") -contains $m) { return $m }
+  Write-Log "WARN: unknown HermesLaunchMode '$Mode'; using none"
+  return "none"
+}
+
+function Get-HermesKillCandidates {
+  param([string]$HermesBinDir)
+  $norm = ""
+  if ($HermesBinDir) {
+    try {
+      $norm = ([System.IO.Path]::GetFullPath($HermesBinDir)).ToLowerInvariant().Replace("/", "\")
+    } catch {
+      $norm = $HermesBinDir.ToLowerInvariant().Replace("/", "\")
+    }
+  }
+  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $c = $_.CommandLine
+    if (-not $c) { return $false }
+    if ($c -match "pytest|unittest") { return $false }
+    $lc = $c.ToLowerInvariant().Replace("/", "\")
+    if ($norm -and $lc.Contains($norm)) { return $true }
+    if ($_.Name -ieq "hermes.exe") { return $true }
+    if ($lc -match "hermes\.cmd" -and ($lc -match "\bgateway\b" -or $lc -match "--tui")) { return $true }
+    if ($lc -match "\\hermes\\bin\\" -or $lc -match "\\hermes-agent\\") { return $true }
+    if ($_.Name -ieq "node.exe" -and $lc -match "hermes" -and ($lc -match "gateway" -or $lc -match "tui")) { return $true }
+    $false
+  })
+}
+
+function Get-OurWebListenerProcesses {
+  $out = New-Object System.Collections.Generic.List[object]
+  try {
+    $conns = @(Get-NetTCPConnection -LocalPort $WebPort -State Listen -ErrorAction SilentlyContinue)
+    $pids = @($conns | Select-Object -ExpandProperty OwningProcess -Unique)
+    foreach ($owningPid in $pids) {
+      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owningPid" -ErrorAction SilentlyContinue
+      if (-not $p) { continue }
+      $c = $p.CommandLine
+      if (-not $c) { continue }
+      if ($c -match "chat_webapp|aidun-chat-web") { $out.Add($p) }
+    }
+  } catch {}
+  return @($out)
+}
+
+function Stop-ProcessListLogged {
+  param([array]$Procs, [string]$Label)
+  $ids = @($Procs | ForEach-Object { [int]$_.ProcessId } | Sort-Object -Unique)
+  foreach ($id in $ids) {
+    $one = @($Procs | Where-Object { $_.ProcessId -eq $id })[0]
+    $snip = ""
+    if ($one.CommandLine) {
+      $mx = [Math]::Min(140, $one.CommandLine.Length)
+      $snip = $one.CommandLine.Substring(0, $mx)
+      if ($one.CommandLine.Length -gt $mx) { $snip += "..." }
+    }
+    Write-Log "RecycleAll: stop $Label PID=$id $snip"
+    Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+  }
+  if ($ids.Count -gt 0) { Start-Sleep -Seconds 1 }
+}
+
+function Invoke-RecycleAidunStack {
+  param(
+    [bool]$KillHermes,
+    [string]$HermesLauncherPath
+  )
+  Write-Log "RecycleAll: scanning processes..."
+  Stop-ProcessListLogged -Procs (Get-HermesWorkerWatchProcesses) -Label "hermes_worker"
+  Stop-ProcessListLogged -Procs (Get-BridgeDaemonProcesses) -Label "bridge"
+  Stop-ProcessListLogged -Procs (Get-OurWebListenerProcesses) -Label "web"
+  if ($KillHermes -and $HermesLauncherPath) {
+    $bin = Split-Path -Parent $HermesLauncherPath
+    Stop-ProcessListLogged -Procs (Get-HermesKillCandidates -HermesBinDir $bin) -Label "hermes"
+  } elseif ($KillHermes) {
+    Stop-ProcessListLogged -Procs (Get-HermesKillCandidates -HermesBinDir "") -Label "hermes"
+  }
+  Start-Sleep -Seconds 1
+  Write-Log "RecycleAll: stop pass done."
+}
+
+function Start-HermesTuiConsole {
+  param([string]$LauncherPath)
+  $bin = Split-Path -Parent $LauncherPath
+  Write-Log "Hermes: open TUI console (leave window open): $LauncherPath --tui"
+  Start-Process -FilePath "cmd.exe" -ArgumentList @(
+    "/k",
+    "cd /d `"$bin`" && `"$LauncherPath`" --tui"
+  ) -WorkingDirectory $bin
+}
+
+function Start-HermesGatewayMinimized {
+  param([string]$LauncherPath)
+  $bin = Split-Path -Parent $LauncherPath
+  Write-Log "Hermes: start gateway minimized: gateway run"
+  Start-Process -FilePath $LauncherPath -ArgumentList @("gateway", "run") -WorkingDirectory $bin `
+    -WindowStyle Minimized
+}
+
 $py = Get-PythonLauncher
 if (-not $py) {
   Write-Log "ERROR: py -3 or python not found. Install Python 3.10+ and add to PATH."
@@ -132,6 +299,64 @@ Write-Log "Python: $($py.Exe) $($py.Prefix -join ' ')"
 
 if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
   Write-Log "WARN: .env missing under repo root; bridge/web may exit (need KQ_POOL_API_KEY). Copy .env.example to .env"
+}
+
+$hermesLauncher = $null
+if (-not $NoHermes) {
+  $hp = $HermesCmdPath
+  if (-not $hp) { $hp = "" }
+  $hermesLauncher = Resolve-HermesLauncher -ExplicitPath $hp
+}
+$hermesResolvedMode = Resolve-HermesLaunchMode -Mode $HermesLaunchMode -LauncherExists ([bool]$hermesLauncher)
+if (-not $hermesLauncher -and $hermesResolvedMode -ne "none") {
+  Write-Log "WARN: Hermes launcher not found (set -HermesCmdPath or HERMES_CMD); HermesLaunchMode effective=none"
+  $hermesResolvedMode = "none"
+}
+
+if ($RecycleAll) {
+  Invoke-RecycleAidunStack -KillHermes:(-not $NoHermes) -HermesLauncherPath $hermesLauncher
+}
+
+# --- Hermes (before bridge; webhook consumer expects gateway up) ---
+if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
+  $skipHermesStart = $false
+  if (-not $RecycleAll -and (Test-HermesGatewayListening)) {
+    Write-Log "Hermes: gateway already listening on port $HermesGatewayPort ; skip Hermes start."
+    $skipHermesStart = $true
+  }
+  if (-not $skipHermesStart) {
+    if ($hermesResolvedMode -eq "gateway") {
+      Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
+      if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
+        Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
+      } else {
+        Write-Log "WARN: Hermes gateway port $HermesGatewayPort not listening after ${HermesGatewayReadyTimeoutSec}s."
+      }
+    }
+    elseif ($hermesResolvedMode -eq "tui") {
+      Start-HermesTuiConsole -LauncherPath $hermesLauncher
+      Write-Log "Hermes: TUI-only mode; start gateway from TUI if needed."
+    }
+    elseif ($hermesResolvedMode -eq "tui_then_gateway") {
+      Start-HermesTuiConsole -LauncherPath $hermesLauncher
+      Write-Log "Hermes: TUI warmup ${HermesTuiWarmupSec}s..."
+      Start-Sleep -Seconds $HermesTuiWarmupSec
+      if (-not (Test-HermesGatewayListening)) {
+        Start-HermesGatewayMinimized -LauncherPath $hermesLauncher
+        if (Wait-HermesGatewayReady -TimeoutSec $HermesGatewayReadyTimeoutSec) {
+          Write-Log "Hermes: gateway port $HermesGatewayPort is listening."
+        } else {
+          Write-Log "WARN: Hermes gateway port $HermesGatewayPort not listening after ${HermesGatewayReadyTimeoutSec}s."
+        }
+      } else {
+        Write-Log "Hermes: gateway already listening after TUI warmup; skip second gateway start."
+      }
+    }
+  }
+} elseif ($NoHermes) {
+  Write-Log "Skip Hermes (-NoHermes)."
+} else {
+  Write-Log "Hermes: skip (mode=$hermesResolvedMode or no launcher)."
 }
 
 # --- bridge ---
@@ -152,7 +377,7 @@ if (Test-BridgeDaemonRunning) {
   }
 }
 
-# --- aidun-hermes-worker watch (reads data/pending, reply to pool) ---
+# --- aidun-hermes-worker watch ---
 if (-not $NoHermesWorker) {
   if (Test-HermesWorkerWatchRunning) {
     Write-Log "aidun-hermes-worker watch already running; skip start."

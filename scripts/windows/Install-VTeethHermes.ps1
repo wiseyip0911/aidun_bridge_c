@@ -256,7 +256,19 @@ Write-Host "[9/10] Applying V-Teeth skin..."
 & $HermesExe config set display.skin vteeth
 
 Write-Host ""
-Write-Host "[10/10] Testing Hermes..."
+Write-Host "[10/11] Aidun webhook (8644 + bridge-task)..."
+
+$webhookHelper = Join-Path $PSScriptRoot "Ensure-HermesBridgeWebhook.ps1"
+if (Test-Path -LiteralPath $webhookHelper) {
+    . $webhookHelper
+    $null = Ensure-HermesBridgeWebhookSetup -LauncherPath $HermesCmd -GatewayPort 8644
+    Write-Host "Webhook platform enabled in $HermesHome\.env ; bridge-task route in webhook_subscriptions.json"
+} else {
+    Write-Host "Warning: $webhookHelper not found; run start script once to configure webhook."
+}
+
+Write-Host ""
+Write-Host "[11/11] Testing Hermes..."
 
 & $HermesExe --version
 & $HermesExe doctor

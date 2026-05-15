@@ -340,7 +340,7 @@ function Invoke-RecycleAidunStack {
 }
 
 function Write-HermesStartFailedHint {
-  $msgZh = "启动 Hermes 失败，请检查 Hermes 是否正确安装和正确启动。"
+  $msgZh = "启动 Hermes 失败：请确认 Hermes 已安装，且 webhook 平台已启用（WEBHOOK_ENABLED=true，端口 $HermesGatewayPort 在监听）。"
   Write-Host $msgZh
   Write-Log "WARN: $msgZh"
 }
@@ -358,8 +358,8 @@ function Start-HermesTuiConsole {
 function Start-HermesGatewayMinimized {
   param([string]$LauncherPath)
   $bin = Split-Path -Parent $LauncherPath
-  Write-Log "Hermes: start gateway minimized: gateway run"
-  Start-Process -FilePath $LauncherPath -ArgumentList @("gateway", "run") -WorkingDirectory $bin `
+  Write-Log "Hermes: start gateway minimized: gateway run --replace (webhook port $HermesGatewayPort)"
+  Start-Process -FilePath $LauncherPath -ArgumentList @("gateway", "run", "--replace") -WorkingDirectory $bin `
     -WindowStyle Minimized
 }
 
@@ -377,6 +377,10 @@ if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
 }
 
 $hermesInstallScript = Join-Path $PSScriptRoot "Install-VTeethHermes.ps1"
+$hermesWebhookScript = Join-Path $PSScriptRoot "Ensure-HermesBridgeWebhook.ps1"
+if (Test-Path -LiteralPath $hermesWebhookScript) {
+  . $hermesWebhookScript
+}
 
 $hermesLauncher = $null
 if (-not $NoHermes) {
@@ -416,6 +420,10 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
     $skipHermesStart = $true
   }
   if (-not $skipHermesStart) {
+    if (Get-Command Ensure-HermesBridgeWebhookSetup -ErrorAction SilentlyContinue) {
+      $hh = Ensure-HermesBridgeWebhookSetup -LauncherPath $hermesLauncher -GatewayPort $HermesGatewayPort
+      if ($hh) { Write-Log "Hermes: ensured webhook platform + bridge-task route under $hh" }
+    }
     if ($hermesResolvedMode -eq "gateway") {
       $null = Start-HermesGatewayAndWait -LauncherPath $hermesLauncher
     }

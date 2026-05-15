@@ -140,7 +140,7 @@ aidun-chat-web
 仓库内 **`scripts/windows/Start-桥与看板.bat`**(同目录另有英文名 **`Start-Bridge-And-Dashboard.bat`**,功能相同):双击后会
 
 - **`-RecycleAll -HermesLaunchMode auto`**:先结束本机栈上旧进程(**`hermes_worker watch`**、**`py -m aidun_bridge_c --no-interactive`**、在 **`WebPort`** 上监听的 **`chat_webapp`/`aidun-chat-web`**、以及命令行可识别的 **Hermes** 相关进程),再按顺序拉起。若 **`auto`** 且未找到 Hermes 启动器,则新开窗口运行仓库内 **`scripts/windows/Install-VTeethHermes.ps1`**(原 V-Teeth Windows 装机脚本),**本启动器立即 exit 0 退出**(不在此等待安装完成);安装结束后再双击本脚本。不需要此行为时传 **`-SkipHermesInstall`**(将退回仅桥/看板,且 Hermes 仍为缺失)。安装脚本要求 **D: 盘** 与可访问 **`raw.githubusercontent.com`**。
-- **Hermes(`auto`)**:若存在启动器,则**直接**最小化启动 **`hermes gateway run`** 并等待 **8644** 就绪(默认最多 **90s** + **15s** 宽限,约每 **15s** 打进度日志;同时探测 TCP 与 **`/health`**)。**不再**默认先开 TUI(TUI 与 gateway 易争用 Hermes 单实例,导致 gateway 长时间起不来)。需要 TUI 控制台时加 **`-WithHermesTui`**(gateway 起来后再开)。若仍要「先 TUI 后 gateway」,显式传 **`-HermesLaunchMode tui_then_gateway`**。
+- **Hermes(`auto`)**:若存在启动器,会先在本机 Hermes 目录写入 **`WEBHOOK_ENABLED=true`** / **`WEBHOOK_PORT=8644`** 与 **`bridge-task`** 路由(否则 gateway 进程在跑但 **8644 不会监听**),再最小化启动 **`hermes gateway run --replace`** 并等待 **8644** 就绪(默认最多 **90s** + **15s** 宽限;探测 TCP 与 **`/health`**)。**不再**默认先开 TUI。需要 TUI 时加 **`-WithHermesTui`**。若仍要「先 TUI 后 gateway」,显式传 **`-HermesLaunchMode tui_then_gateway`**。
 - 然后**最小化**启动桥 **`py -3 -m aidun_bridge_c --no-interactive`**。
 - 再检测 **`hermes_worker watch`**;没有则**最小化**拉起(默认 `--interval 5`)。不需要时可传 **`-NoHermesWorker`**。
 - 检测本机 **`ListenHost:WebPort`** 是否已有监听;没有则启动 `aidun-chat-web`(或 `python -m aidun_bridge_c.chat_webapp` 兜底)。

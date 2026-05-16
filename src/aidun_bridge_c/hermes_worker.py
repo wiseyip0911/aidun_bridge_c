@@ -43,8 +43,12 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+from aidun_bridge_c.hermes_gateway_slot import wait_for_gateway_slot
 
 
 # Windows 终端中文不乱码
@@ -400,6 +404,38 @@ def cmd_reply_json(args: argparse.Namespace) -> int:
 # 子命令:watch
 # ---------------------------------------------------------------------------
 
+def _gateway_notify_url() -> str | None:
+    raw = (os.environ.get("KQ_POOL_NOTIFY_WEBHOOK_URL") or "").strip()
+    if raw:
+        return raw
+    port = (os.environ.get("HERMES_GATEWAY_PORT") or "8644").strip()
+    return f"http://127.0.0.1:{port}/webhooks/bridge-task"
+
+
+def _notify_hermes_gateway(record_id: str) -> bool:
+    url = _gateway_notify_url()
+    if not url:
+        return False
+    wait_for_gateway_slot(notify_url=url)
+    body = json.dumps({"record_id": record_id}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            # Hermes webhook 用 X-Request-ID 作为 delivery_id；与守护进程 notify 对齐，避免重复起两个 Agent。
+            "X-Request-ID": record_id,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return 200 <= resp.status < 300
+    except urllib.error.URLError as e:
+        sys.stderr.write(f"[watch] gateway notify failed ({url}): {e}\n")
+        return False
+
+
 def _summarize(rec: dict, fp: Path) -> str:
     rid = rec.get("record_id", fp.stem)
     pj = rec.get("payload_json", {}) or {}
@@ -427,6 +463,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     interval = max(1, int(args.interval))
     once = bool(args.once)
     quiet = bool(args.quiet)
+    notify_gateway = bool(args.notify_gateway)
 
     pool = _pool_dir()
     pool.mkdir(parents=True, exist_ok=True)
@@ -465,6 +502,13 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 kind = "积压任务" if first_pass else "新任务"
                 print(f"[{ts}] {kind} ↓\n{_summarize(rec, fp)}")
                 sys.stdout.flush()
+                if notify_gateway:
+                    rid = rec.get("record_id", fp.stem)
+                    if _notify_hermes_gateway(rid):
+                        print(f"[watch] 已通知 gateway 处理 {rid[:8]}…")
+                    else:
+                        print(f"[watch] gateway 通知失败,请检查 8644 或手动 reply")
+                    sys.stdout.flush()
 
             if new_records:
                 remaining = len(current)
@@ -547,12 +591,19 @@ def build_parser() -> argparse.ArgumentParser:
     pw.add_argument(
         "--quiet", action="store_true", help="静默模式,不打启动横幅"
     )
+    pw.add_argument(
+        "--notify-gateway",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="新任务时 POST 到 Hermes gateway bridge-task(默认开启)",
+    )
     pw.set_defaults(func=cmd_watch)
 
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
+    _autoload_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

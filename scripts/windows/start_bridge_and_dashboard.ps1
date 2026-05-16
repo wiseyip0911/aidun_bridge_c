@@ -6,9 +6,10 @@
 .DESCRIPTION
   Default (no -RecycleAll): start missing pieces only (skip if already running).
   -RecycleAll: stop matching bridge / hermes_worker / Hermes / our web on WebPort, then start in order.
-  HermesLaunchMode auto: if hermes.cmd exists -> gateway only (fast path for webhook 8644). Use -WithHermesTui to open TUI after gateway is up.
+  HermesLaunchMode auto: TUI + gateway 8644; bridge POSTs new tasks to gateway (Hermes must reply via aidun-hermes-worker).
+  On Windows, always runs Invoke-HermesWindowsAgentSetup (terminal.cwd, TERMINAL_CWD, webhook route) before Hermes starts.
+  Pass -NoBridgeWebhook to disable pool notify (tasks stay in pending until manual reply).
   If auto and Hermes is missing, runs scripts/windows/Install-VTeethHermes.ps1 in a new window and exits 0 (relaunch after install).
-  tui_then_gateway: TUI first then gateway (can block; Hermes is often single-instance). Prefer auto + -WithHermesTui.
 
   NOTE: Most log lines are ASCII-only for Windows PowerShell 5.1 -File; user-facing WARN lines may use Chinese.
 #>
@@ -30,7 +31,8 @@ param(
   [switch]$NoHermes,
   [switch]$NoHermesWorker,
   [switch]$SkipHermesInstall,
-  [switch]$WithHermesTui
+  [switch]$WithHermesTui,
+  [switch]$NoBridgeWebhook
 )
 
 $ErrorActionPreference = "Continue"
@@ -255,7 +257,7 @@ function Resolve-HermesLaunchMode {
   param([string]$Mode, [bool]$LauncherExists)
   $m = $Mode.ToLowerInvariant().Trim()
   if ($m -eq "auto") {
-    if ($LauncherExists) { return "gateway" }
+    if ($LauncherExists) { return "tui_then_gateway" }
     return "none"
   }
   if (@("none", "gateway", "tui", "tui_then_gateway") -contains $m) { return $m }
@@ -382,6 +384,11 @@ if (Test-Path -LiteralPath $hermesWebhookScript) {
   . $hermesWebhookScript
 }
 
+$hermesAgentMandatoryScript = Join-Path $PSScriptRoot "Apply-HermesWindowsAgentMandatoryFixes.ps1"
+if (Test-Path -LiteralPath $hermesAgentMandatoryScript) {
+  . $hermesAgentMandatoryScript
+}
+
 $hermesLauncher = $null
 if (-not $NoHermes) {
   $hp = $HermesCmdPath
@@ -408,28 +415,67 @@ if (-not $hermesLauncher -and $hermesResolvedMode -ne "none") {
   $hermesResolvedMode = "none"
 }
 
+if (Get-Command Test-AidunHermesWindowsAgentMandatoryFixes -ErrorAction SilentlyContinue) {
+  $mhm = Test-AidunHermesWindowsAgentMandatoryFixes -BridgeRepoRoot $RepoRoot -HermesLauncherPath $hermesLauncher -GatewayPort $HermesGatewayPort -Py $py
+  if (-not $mhm.AllPassed) {
+    Write-Log "Mandatory Hermes agent fixes not satisfied; running Invoke-AidunHermesWindowsAgentMandatoryFixes..."
+    if (Get-Command Invoke-AidunHermesWindowsAgentMandatoryFixes -ErrorAction SilentlyContinue) {
+      $mrH = Invoke-AidunHermesWindowsAgentMandatoryFixes -BridgeRepoRoot $RepoRoot -HermesLauncherPath $hermesLauncher -GatewayPort $HermesGatewayPort -Py $py
+      foreach ($ln in @($mrH.Log)) { Write-Log "mandatory-hermes-agent: $ln" }
+      foreach ($st in @($mrH.StillIssues)) { Write-Log "WARN mandatory-hermes-agent: $st" }
+    }
+  } else {
+    Write-Log "Mandatory Hermes agent fixes: OK."
+  }
+}
+
 if ($RecycleAll) {
   Invoke-RecycleAidunStack -KillHermes:(-not $NoHermes) -HermesLauncherPath $hermesLauncher
 }
 
-# --- Hermes (before bridge; webhook consumer expects gateway up) ---
+$hermesWillRunGateway = $false
+if (-not $NoHermes -and $hermesResolvedMode -in @("gateway", "tui_then_gateway")) {
+  $hermesWillRunGateway = $true
+}
+
+# Always sync Hermes Windows paths / terminal.cwd before starting or reusing gateway.
+if (-not $NoHermes -and $hermesLauncher -and (Get-Command Invoke-HermesWindowsAgentSetup -ErrorAction SilentlyContinue)) {
+  $enableWh = $hermesWillRunGateway -and (-not $NoBridgeWebhook)
+  $setup = Invoke-HermesWindowsAgentSetup -LauncherPath $hermesLauncher -BridgeRepoRoot $RepoRoot `
+    -GatewayPort $HermesGatewayPort -EnableWebhook:$enableWh
+  if ($setup.Home) {
+    Write-Log "Hermes: Windows agent config applied (HERMES_HOME=$($setup.Home), TERMINAL_CWD=$RepoRoot)"
+  }
+  foreach ($issue in @($setup.Issues)) {
+    Write-Log "WARN Hermes Windows config: $issue"
+  }
+}
+
+if (Get-Command Enable-BridgePoolWebhookNotify -ErrorAction SilentlyContinue) {
+  if ($NoBridgeWebhook) {
+    if (Get-Command Disable-BridgePoolWebhookNotify -ErrorAction SilentlyContinue) {
+      $null = Disable-BridgePoolWebhookNotify -BridgeRepoRoot $RepoRoot
+    }
+    Write-Log "Bridge: pool webhook notify disabled (-NoBridgeWebhook)."
+  } elseif ($hermesWillRunGateway) {
+    $null = Enable-BridgePoolWebhookNotify -BridgeRepoRoot $RepoRoot -GatewayPort $HermesGatewayPort
+    Write-Log "Bridge: pool webhook notify -> http://127.0.0.1:${HermesGatewayPort}/webhooks/bridge-task"
+  }
+}
+
 if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
   $skipHermesStart = $false
-  if (-not $RecycleAll -and (Test-HermesGatewayListening)) {
+  if (-not $RecycleAll -and $hermesResolvedMode -eq "gateway" -and (Test-HermesGatewayListening)) {
     Write-Log "Hermes: gateway already listening on port $HermesGatewayPort ; skip Hermes start."
     $skipHermesStart = $true
   }
   if (-not $skipHermesStart) {
-    if (Get-Command Ensure-HermesBridgeWebhookSetup -ErrorAction SilentlyContinue) {
-      $hh = Ensure-HermesBridgeWebhookSetup -LauncherPath $hermesLauncher -GatewayPort $HermesGatewayPort
-      if ($hh) { Write-Log "Hermes: ensured webhook platform + bridge-task route under $hh" }
-    }
     if ($hermesResolvedMode -eq "gateway") {
       $null = Start-HermesGatewayAndWait -LauncherPath $hermesLauncher
     }
     elseif ($hermesResolvedMode -eq "tui") {
       Start-HermesTuiConsole -LauncherPath $hermesLauncher
-      Write-Log "Hermes: TUI-only mode; start gateway from TUI if needed."
+      Write-Log "Hermes: TUI-only mode (-HermesLaunchMode tui); gateway 8644 not started."
     }
     elseif ($hermesResolvedMode -eq "tui_then_gateway") {
       Start-HermesTuiConsole -LauncherPath $hermesLauncher
@@ -461,7 +507,11 @@ if (-not $NoHermes -and $hermesResolvedMode -ne "none" -and $hermesLauncher) {
 
 # --- bridge ---
 if (Test-BridgeDaemonRunning) {
-  Write-Log "Bridge daemon already running; skip start."
+  if ($hermesWillRunGateway -and -not $NoBridgeWebhook -and -not $RecycleAll) {
+    Write-Log "WARN: bridge already running; restart stack (-RecycleAll) so KQ_POOL_NOTIFY_WEBHOOK_* in .env takes effect."
+  } else {
+    Write-Log "Bridge daemon already running; skip start."
+  }
 } else {
   Write-Log "Starting bridge daemon..."
   $args = @()
@@ -486,8 +536,12 @@ if (-not $NoHermesWorker) {
     $hwArgs = @()
     if ($py.Prefix.Count -gt 0) { $hwArgs += $py.Prefix }
     $hwArgs += @("-m", "aidun_bridge_c.hermes_worker", "watch", "--interval", "$HermesWatchIntervalSec")
+    # 已配置 KQ_POOL_NOTIFY_WEBHOOK_URL 时由守护进程 POST notify;watch 侧加 --no-notify-gateway 避免双发。
+    if (Test-BridgePoolNotifyWebhookActive -BridgeRepoRoot $RepoRoot) {
+      $hwArgs += "--no-notify-gateway"
+    }
     Start-Process -FilePath $py.Exe -ArgumentList $hwArgs -WorkingDirectory $RepoRoot `
-      -WindowStyle Minimized
+      -WindowStyle Normal
     Start-Sleep -Seconds 1
     if (Test-HermesWorkerWatchRunning) {
       Write-Log "Hermes worker watch started."

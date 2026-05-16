@@ -1,6 +1,10 @@
 """Aidun kq-pool C 端守护进程入口:``python -m aidun_bridge_c``。"""
 from __future__ import annotations
 
+from aidun_bridge_c.hermes_gateway_slot import install_daemon_notify_guard
+
+install_daemon_notify_guard()
+
 from bridge_c_core.cli import make_cli
 
 from aidun_bridge_c.client import KqPoolClient

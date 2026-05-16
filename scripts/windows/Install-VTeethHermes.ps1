@@ -212,6 +212,19 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
 Write-Host "Skin written: $SkinPath"
 
 Write-Host ""
+Write-Host "[7.5] Patching ui-tui banner (multiline [#hex]...[/] skin logo colors)..."
+
+$BridgeRepoRootForTui = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+$PatchBannerTs = Join-Path $BridgeRepoRootForTui "patches\hermes-windows\ui-tui-src-banner.ts"
+$TuiBannerTs = Join-Path $InstallDir "ui-tui\src\banner.ts"
+if ((Test-Path -LiteralPath $PatchBannerTs) -and (Test-Path -LiteralPath (Split-Path $TuiBannerTs -Parent))) {
+  Copy-Item -LiteralPath $PatchBannerTs -Destination $TuiBannerTs -Force
+  Write-Host "Applied: ui-tui/src/banner.ts"
+} else {
+  Write-Host "Warning: ui-tui banner patch skipped (missing patch file or ui-tui/src)."
+}
+
+Write-Host ""
 Write-Host "[8/10] Patching Hermes banner title and hero alignment..."
 
 if (-not (Test-Path $BannerFile)) {
@@ -256,15 +269,17 @@ Write-Host "[9/10] Applying V-Teeth skin..."
 & $HermesExe config set display.skin vteeth
 
 Write-Host ""
-Write-Host "[10/11] Aidun webhook (8644 + bridge-task)..."
+Write-Host "[10/11] Hermes agent cwd (bridge repo; webhook off by default)..."
 
 $webhookHelper = Join-Path $PSScriptRoot "Ensure-HermesBridgeWebhook.ps1"
 if (Test-Path -LiteralPath $webhookHelper) {
     . $webhookHelper
-    $null = Ensure-HermesBridgeWebhookSetup -LauncherPath $HermesCmd -GatewayPort 8644
-    Write-Host "Webhook platform enabled in $HermesHome\.env ; bridge-task route in webhook_subscriptions.json"
+    $bridgeRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+    $null = Invoke-HermesWindowsAgentSetup -LauncherPath $HermesCmd -GatewayPort 8644 -BridgeRepoRoot $bridgeRoot -EnableWebhook $true
+    Enable-BridgePoolWebhookNotify -BridgeRepoRoot $bridgeRoot -GatewayPort 8644 | Out-Null
+    Write-Host "terminal.cwd + gateway 8644 + bridge-task webhook enabled for $bridgeRoot"
 } else {
-    Write-Host "Warning: $webhookHelper not found; run start script once to configure webhook."
+    Write-Host "Warning: $webhookHelper not found; run start script once."
 }
 
 Write-Host ""

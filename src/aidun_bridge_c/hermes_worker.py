@@ -48,6 +48,12 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bridge_c_core.record_protocol import (
+    build_result_payload,
+    is_agent_work_item,
+    record_type_of,
+)
+
 from aidun_bridge_c.hermes_gateway_slot import wait_for_gateway_slot
 
 
@@ -258,6 +264,8 @@ def cmd_list(args: argparse.Namespace) -> int:
             continue
         if args.channel and _channel_of(rec) != args.channel:
             continue
+        if not is_agent_work_item(rec):
+            continue
         records.append((fp, rec))
 
     if args.json:
@@ -322,6 +330,15 @@ def _do_reply(rid_prefix: str, payload_json: dict, *, mark_done: bool = True) ->
     fp = _match_rid(rid_prefix)
     rec = _load_record(fp)
 
+    if not is_agent_work_item(rec):
+        sys.stderr.write(
+            f"[ERR] {fp.stem} 是 result/回执(record_type={record_type_of(rec)!r}),"
+            "不能再次 reply,否则会与对方互 ping。\n"
+            "  请执行: aidun-hermes-worker done "
+            f"{rid_prefix}\n"
+        )
+        return 2
+
     to_instance_id = rec.get("payload_json", {}).get("_from_instance_id")
     correlation_id = rec.get("correlation_id", "")
     if not to_instance_id:
@@ -333,12 +350,17 @@ def _do_reply(rid_prefix: str, payload_json: dict, *, mark_done: bool = True) ->
         return 2
 
     client = _load_client()
+    stamped = build_result_payload(
+        payload_json,
+        correlation_id=correlation_id,
+        answered_by=str(payload_json.get("answered_by") or "hermes"),
+    )
     try:
         body = {
             "to_instance_id": to_instance_id,
             "correlation_id": correlation_id,
             "record_type": "result",
-            "payload_json": payload_json,
+            "payload_json": stamped,
         }
         resp = client.submit_to(body)
     except Exception as e:
@@ -367,12 +389,14 @@ def cmd_reply(args: argparse.Namespace) -> int:
     if not text.strip():
         sys.stderr.write("[ERR] 回复文本不能为空。\n")
         return 2
-    payload = {
-        "status": "ok",
-        "result_text": text,
-        "answered_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "answered_by": "hermes",
-    }
+    payload = build_result_payload(
+        {
+            "result_text": text,
+            "answered_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "answered_by": "hermes",
+        },
+        correlation_id="",
+    )
     return _do_reply(args.rid, payload)
 
 
@@ -397,7 +421,14 @@ def cmd_reply_json(args: argparse.Namespace) -> int:
         datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
     payload.setdefault("answered_by", "hermes")
-    return _do_reply(args.rid, payload)
+    fp = _match_rid(args.rid)
+    rec = _load_record(fp)
+    stamped = build_result_payload(
+        payload,
+        correlation_id=str(rec.get("correlation_id") or ""),
+        answered_by=str(payload.get("answered_by") or "hermes"),
+    )
+    return _do_reply(args.rid, stamped)
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +529,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
                     seen.discard(stale)
 
             for fp, rec in new_records:
+                if not is_agent_work_item(rec):
+                    try:
+                        fp.unlink()
+                    except OSError:
+                        pass
+                    print(
+                        f"[watch] 跳过 result/回执 {fp.stem[:8]}… "
+                        f"(type={record_type_of(rec)!r}),已自动清理"
+                    )
+                    sys.stdout.flush()
+                    continue
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 kind = "积压任务" if first_pass else "新任务"
                 print(f"[{ts}] {kind} ↓\n{_summarize(rec, fp)}")

@@ -9,6 +9,7 @@ from aidun_bridge_c import KqPoolClient
 def test_kqpool_protocol_constants() -> None:
     assert KqPoolClient.URL_PREFIX == "/kq-pool/v1"
     assert KqPoolClient.INSTANCE_HEADER == "X-Kq-Pool-Instance-Id"
+    assert KqPoolClient.DEFAULT_BASE_URL == "https://c.aidunkouqiang.com"
     assert KqPoolClient.ENV_BASE_URL == "KQ_POOL_BASE_URL"
     assert KqPoolClient.ENV_API_KEY == "KQ_POOL_API_KEY"
     assert KqPoolClient.ENV_INSTANCE_ID == "KQ_POOL_INSTANCE_ID"

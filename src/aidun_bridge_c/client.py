@@ -8,7 +8,7 @@ class KqPoolClient(BaseClient):
     URL_PREFIX = "/kq-pool/v1"
     INSTANCE_HEADER = "X-Kq-Pool-Instance-Id"
 
-    DEFAULT_BASE_URL = "http://c.aidunkouqiang.com"
+    DEFAULT_BASE_URL = "https://c.aidunkouqiang.com"
 
     ENV_BASE_URL = "KQ_POOL_BASE_URL"
     ENV_API_KEY = "KQ_POOL_API_KEY"

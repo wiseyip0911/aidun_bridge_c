@@ -8,7 +8,7 @@
 ## 1. 准备
 
 - **Python ≥ 3.10**(`python3 --version` 或 Windows 上 `py -3 --version`)
-- 客户机能访问 `c.aidunkouqiang.com`(`curl -I http://c.aidunkouqiang.com` 应有响应)
+- 客户机能访问 `c.aidunkouqiang.com`（`curl -I https://c.aidunkouqiang.com` 应有响应）
 - 客户机能访问 `github.com`(`pip install` 时会从 GitHub 拉核心库 `bridge-c-core`)
 - **一个 `api_key`**(由对端管理员事先在 Aidun 后台为你这台机器开好;只会出现一次,丢了找管理员重发)
 
@@ -66,7 +66,7 @@ python -m aidun_bridge_c --once
 期望输出:
 
 ```
-... GET http://c.aidunkouqiang.com/kq-pool/v1/directory "HTTP/1.1 200 OK"
+... GET https://c.aidunkouqiang.com/kq-pool/v1/directory "HTTP/1.1 200 OK"
 {
   "success": true,
   "items": [ ... ],
@@ -213,7 +213,7 @@ sudo journalctl -u aidun-bridge-c -f
 | 现象 | 多半原因 | 怎么办 |
 |---|---|---|
 | `pip install` 报错 `Could not find a version` / `Repository not found` | 客户机没法访问 github.com | 网管放行 github.com,或挂代理 |
-| `--once` 卡住几十秒后超时 | 客户机访问不了对端 | `curl -I http://c.aidunkouqiang.com` 自查 |
+| `--once` 卡住几十秒后超时 | 客户机访问不了对端 | `curl -I https://c.aidunkouqiang.com` 自查 |
 | 启动时提示**回显输入密钥** | 没建 `.env`,也没 `export KQ_POOL_API_KEY` | 回到 §3 建 `.env` |
 | 启动直接 `请设置环境变量 KQ_POOL_API_KEY` 退出 | 同上,且加了 `--no-interactive` 或在 systemd 里 | 同上;systemd 下 `.env` 要放在 `WorkingDirectory` |
 | HTTP 401 | api_key 错 / 被禁用 / 复制时带了空格 | 找对端管理员确认;`cat .env` 检查那一行尾部是否多了空格 |

@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <title>V-Teeth卫齿士 · 消息看板</title>
   <!-- 主色 CMYK C:0 M:60 Y:100 K:0 → 屏显约 #FF6600 -->
   <style>
@@ -101,8 +103,18 @@
     .bubble-row { display: flex; }
     .bubble-row.in { justify-content: flex-start; }
     .bubble-row.out { justify-content: flex-end; }
+    .msg-wrap {
+      display: flex; flex-direction: column; max-width: 78%; min-width: 0;
+    }
+    .bubble-row.in .msg-wrap { align-items: flex-start; }
+    .bubble-row.out .msg-wrap { align-items: flex-end; }
+    .sender-label {
+      font-size: 12px; font-weight: 600; margin-bottom: 4px; padding: 0 2px;
+    }
+    .sender-label.me { color: var(--vt-brand); }
+    .sender-label.peer { color: #d4a574; }
     .bubble {
-      max-width: 78%; padding: 10px 12px; border-radius: 12px;
+      width: 100%; padding: 10px 12px; border-radius: 12px;
       font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
     }
     .bubble.in { background: var(--in); border: 1px solid var(--border); }
@@ -175,12 +187,19 @@
     </main>
   </div>
   <script>
-    const POLL_MS = 1500;
+    const UI_VERSION = "20260517-2";
+    const POLL_MS = 5000;
+    const POLL_FAST_MS = 900;
+    const POLL_FAST_DURATION_MS = 15000;
     const SK = "aidun-vt-chat:peer";
     const CH_SK = "aidun-vt-chat:channel";
 
     let selectedPeer = sessionStorage.getItem(SK) || "";
     let lastSnapshot = null;
+    let lastThreadKey = "";
+    let selfInstanceId = "";
+    let fastPollUntil = 0;
+    let pollTimerId = null;
 
     (function initChannelSelect() {
       const sel = document.getElementById("channel");
@@ -209,6 +228,68 @@
       return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     }
 
+    /** 将 JSON/日志里常见的字面量 \\n、\\t 转为真实换行，便于 pre-wrap 展示。 */
+    function formatMessageText(text) {
+      if (text == null || text === "") return "";
+      let s = String(text);
+      for (let i = 0; i < 3 && /\\[nrt]/.test(s); i++) {
+        s = s
+          .replace(/\\r\\n/g, "\n")
+          .replace(/\\n/g, "\n")
+          .replace(/\\r/g, "\n")
+          .replace(/\\t/g, "\t");
+      }
+      return s;
+    }
+
+    function senderLabel(m) {
+      if (m.direction === "outbound") return "我";
+      const peer =
+        m.peer_instance_id ||
+        (m.direction === "inbound" ? selectedPeer : "") ||
+        "对方";
+      return peer;
+    }
+
+    function threadFingerprint(messages) {
+      if (!messages.length) return UI_VERSION + "|empty";
+      return (
+        UI_VERSION +
+        "|" +
+        messages
+        .map(
+          (m) =>
+            [
+              m.ts,
+              m.direction,
+              m.text,
+              m.record_type,
+              m.channel,
+              m.peer_instance_id,
+            ].join("\x1f")
+        )
+        .join("\n")
+      );
+    }
+
+    function currentPollMs() {
+      return Date.now() < fastPollUntil ? POLL_FAST_MS : POLL_MS;
+    }
+
+    function scheduleNextPoll() {
+      if (pollTimerId) clearTimeout(pollTimerId);
+      pollTimerId = setTimeout(async () => {
+        await refresh(false);
+        scheduleNextPoll();
+      }, currentPollMs());
+    }
+
+    function startFastPollBurst() {
+      fastPollUntil = Date.now() + POLL_FAST_DURATION_MS;
+      if (pollTimerId) clearTimeout(pollTimerId);
+      refresh(true).then(() => scheduleNextPoll());
+    }
+
     function renderSidebar(summaries, selfId) {
       const sb = document.getElementById("sidebar");
       sb.innerHTML = "";
@@ -228,7 +309,7 @@
         id.textContent = s.peer + (s.peer === selfId ? " (本机)" : "");
         const pv = document.createElement("div");
         pv.className = "peer-preview";
-        pv.textContent = s.last_preview || "(无预览)";
+        pv.textContent = formatMessageText(s.last_preview) || "(无预览)";
         const meta = document.createElement("div");
         meta.className = "peer-meta";
         const arrow = s.last_direction === "outbound" ? "→" : "←";
@@ -238,6 +319,7 @@
         div.appendChild(meta);
         div.addEventListener("click", () => {
           selectedPeer = s.peer;
+          lastThreadKey = "";
           sessionStorage.setItem(SK, selectedPeer);
           document.querySelectorAll(".peer").forEach((p) => p.classList.remove("active"));
           div.classList.add("active");
@@ -250,6 +332,11 @@
 
     function renderThread(messages) {
       const box = document.getElementById("messages");
+      const fp = threadFingerprint(messages);
+      if (fp === lastThreadKey && box.querySelector(".bubble-row")) {
+        return;
+      }
+      lastThreadKey = fp;
       const stick = nearBottom(box);
       box.innerHTML = "";
       if (!selectedPeer) {
@@ -267,25 +354,29 @@
         return;
       }
       for (const m of messages) {
+        const isOut = m.direction === "outbound";
         const row = document.createElement("div");
-        row.className = "bubble-row " + (m.direction === "outbound" ? "out" : "in");
+        row.className = "bubble-row " + (isOut ? "out" : "in");
         const b = document.createElement("div");
-        b.className = "bubble " + (m.direction === "outbound" ? "out" : "in");
+        b.className = "bubble " + (isOut ? "out" : "in");
         const body = document.createElement("div");
-        body.textContent = m.text || "";
+        body.textContent = formatMessageText(m.text);
         const meta = document.createElement("div");
         meta.className = "bubble-meta";
-        meta.textContent =
-          fmtLocal(m.ts) +
-          "  ·  " +
-          (m.channel || "-") +
-          "  ·  " +
-          (m.record_type || "-") +
-          "  ·  cid=" +
-          (m.correlation_id || "-");
+        const metaParts = [fmtLocal(m.ts)];
+        if (m.channel) metaParts.push(m.channel);
+        if (m.record_type) metaParts.push(m.record_type);
+        meta.textContent = metaParts.join("  ·  ");
         b.appendChild(body);
         b.appendChild(meta);
-        row.appendChild(b);
+        const wrap = document.createElement("div");
+        wrap.className = "msg-wrap";
+        const label = document.createElement("div");
+        label.className = "sender-label " + (isOut ? "me" : "peer");
+        label.textContent = senderLabel(m);
+        wrap.appendChild(label);
+        wrap.appendChild(b);
+        row.appendChild(wrap);
         box.appendChild(row);
       }
       if (stick) box.scrollTop = box.scrollHeight;
@@ -307,16 +398,22 @@
         return;
       }
       lastSnapshot = data;
+      selfInstanceId = data.self_instance_id || "";
       const dt = Math.round(performance.now() - t0);
+      const pollLabel =
+        Date.now() < fastPollUntil
+          ? POLL_FAST_MS + "ms(发送后加速)"
+          : POLL_MS + "ms";
       document.getElementById("status").textContent =
-        "本机 " +
+        "UI " +
+        UI_VERSION +
+        "  ·  本机 " +
         (data.self_instance_id || "<未配置>") +
         "  ·  轮询 " +
-        POLL_MS +
-        "ms  ·  上次 " +
+        pollLabel +
+        "  ·  上次 " +
         dt +
-        "ms  ·  " +
-        (data.log_path || "");
+        "ms";
 
       renderSidebar(data.peer_summaries || [], data.self_instance_id || "");
 
@@ -366,7 +463,8 @@
           throw new Error(msg);
         }
         ta.value = "";
-        await refresh(true);
+        lastThreadKey = "";
+        startFastPollBurst();
       } catch (e) {
         setErr(String(e));
       } finally {
@@ -386,8 +484,7 @@
       document.getElementById("thread-head").textContent =
         "与 " + selectedPeer + " 的对话";
     }
-    refresh(true);
-    setInterval(() => refresh(false), POLL_MS);
+    refresh(true).then(() => scheduleNextPoll());
   </script>
 </body>
 </html>

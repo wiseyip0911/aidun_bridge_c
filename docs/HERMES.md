@@ -237,3 +237,42 @@ curl -sS "{BRIDGE_BASE}/bridge/test/product/3"
 ### 详细说明（字段、错误码、安全）
 
 见 yujia 仓库：`bridge/docs/BRIDGE_TEST_PRODUCT_COLUMN.md`。
+
+---
+
+## 7. 员工测试接口（yujia Bridge，HTTP GET）
+
+本机若已启动 **`D:\yujia\bridge`** 网关（根地址 **`{BRIDGE_BASE}`**，默认 **`http://127.0.0.1:8000`**），可通过 **GET** 拉取 **1 / 2 / 3 号员工** 的固定姓名，用于联调或回答「查几号员工」类问题。
+
+### 你要做的事
+
+1. 确认 Bridge 进程在跑（`curl {BRIDGE_BASE}/health` 能通）。
+2. 按用户要的员工编号 **`1`、`2` 或 `3`**，执行（`{BRIDGE_BASE}` 无尾斜杠）：
+
+```text
+curl -sS "{BRIDGE_BASE}/bridge/test/employee/1"
+curl -sS "{BRIDGE_BASE}/bridge/test/employee/2"
+curl -sS "{BRIDGE_BASE}/bridge/test/employee/3"
+```
+
+3. 返回体为 JSON，取字段 **`content`** 作为员工姓名回复用户。
+
+### 各号对应姓名（与接口一致）
+
+| 编号 | `content` |
+|------|-----------|
+| 1 | `老叶` |
+| 2 | `中叶` |
+| 3 | `小叶` |
+
+### 与 `lookup` channel 的关系
+
+当任务 **`channel=lookup`** 且用户意图是「查 1/2/3 号员工」时，**优先**用本节的 HTTP 请求取数，再 `reply` 回投；不要编造未返回的姓名。
+
+### Hermes 全局技能
+
+本机 Hermes 技能目录：`skills/web/yujia-bridge-employee/SKILL.md`（技能名 **`yujia-bridge-employee`**），与产品接口 **`yujia-bridge-products`** 用法相同。
+
+### 详细说明（字段、错误码、安全）
+
+见 yujia 仓库：`bridge/docs/BRIDGE_TEST_EMPLOYEE_COLUMN.md`。

@@ -50,10 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("BRIDGE_C_CLIENT_FACTORY", DEFAULT_FACTORY)
     _static = Path(__file__).resolve().parent / "web_static"
     if _static.is_dir() and (_static / "index.html").is_file():
-        os.environ.setdefault(
-            "BRIDGE_C_CHAT_WEB_STATIC_DIR",
-            str(_static.resolve()),
-        )
+        # 始终用 aidun 包内皮肤，避免沿用环境里指向 bridge_c_core 的旧路径
+        os.environ["BRIDGE_C_CHAT_WEB_STATIC_DIR"] = str(_static.resolve())
     return _core_main(argv)
 
 
